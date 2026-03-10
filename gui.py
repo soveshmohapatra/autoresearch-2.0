@@ -275,16 +275,16 @@ Training is running in the background. Check the logs for progress.
             
             # Experiment History Section
             gr.Markdown("## 📊 Experiment History")
-            
+
             with gr.Row():
                 with gr.Column():
-                    stats_md = gr.Markdown(self.get_experiment_stats)
+                    stats_md = gr.Markdown(self.get_experiment_stats())
                 with gr.Column():
-                    recent_md = gr.Markdown(self.get_recent_experiments_table)
-            
+                    recent_md = gr.Markdown(self.get_recent_experiments_table())
+
             refresh_btn = gr.Button("🔄 Refresh Statistics")
             refresh_btn.click(
-                fn=lambda: (self.get_experiment_stats(), self.get_recent_experiments_table),
+                fn=lambda: (self.get_experiment_stats(), self.get_recent_experiments_table()),
                 outputs=[stats_md, recent_md]
             )
             
