@@ -1,13 +1,14 @@
 """
 GUI Dashboard for Autoresearch 2.0.
-Multi-model, multi-experiment interface with hardware-aware model selection.
+Multi-model, multi-experiment interface with REAL training.
 """
 
 import os
 import json
 import time
 import math
-import threading
+import subprocess
+import signal
 from pathlib import Path
 from datetime import datetime
 from typing import Dict, Any, List
@@ -21,53 +22,123 @@ from models import MODEL_CATALOG, get_compatible_models, get_model_by_name, Mode
 
 
 class ExperimentRunner:
-    """Manages a single experiment."""
+    """Manages a single real training experiment."""
     def __init__(self, exp_id: str, model: ModelConfig, exp_name: str):
         self.exp_id = exp_id
         self.model = model
         self.exp_name = exp_name
-        self.is_running = False
+        self.process = None
         self.start_time = None
         self.cycles_completed = 0
-        self.current_bpb = 1.5
+        self.current_bpb = None
         self.status = "pending"
+        self.log_lines = []
+        self.pid = None
     
     def start(self):
-        self.is_running = True
+        """Start real training process."""
         self.start_time = datetime.now()
-        self.status = "running"
+        self.status = "starting"
+        
+        # Build train.py command with model config
+        cmd = [
+            "uv", "run", "python", "train.py",
+            "--depth", str(self.model.depth),
+            "--aspect-ratio", str(self.model.aspect_ratio),
+            "--batch-size", str(self.model.recommended_batch_size),
+            "--seq-len", str(self.model.recommended_seq_len),
+            "--optimizer", self.model.optimizer,
+            "--experiment-name", self.exp_name,
+        ]
+        
+        if self.model.use_moe:
+            cmd.extend(["--use-moe", "--moe-experts", str(self.model.moe_num_experts)])
+        if self.model.use_gqa:
+            cmd.append("--use-gqa")
+        if self.model.use_swiglu:
+            cmd.append("--use-swiglu")
+        if self.model.use_prenorm:
+            cmd.append("--use-prenorm")
+        
+        try:
+            self.process = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                bufsize=1,
+                preexec_fn=os.setsid
+            )
+            self.pid = self.process.pid
+            self.status = "running"
+            return True, f"Started training (PID: {self.pid})"
+        except Exception as e:
+            self.status = "failed"
+            return False, str(e)
     
     def stop(self):
-        self.is_running = False
+        """Stop training process."""
+        if self.process and self.process.poll() is None:
+            try:
+                os.killpg(os.getpgid(self.process.pid), signal.SIGTERM)
+                self.process.wait(timeout=5)
+            except:
+                if self.process.poll() is None:
+                    os.killpg(os.getpgid(self.process.pid), signal.SIGKILL)
+            self.status = "stopped"
+            return True
         self.status = "stopped"
+        return False
     
     def update(self) -> Dict[str, Any]:
-        if not self.is_running:
-            return {"status": self.status}
+        """Update status from running process."""
+        if self.process:
+            # Read any new output
+            if self.process.stdout:
+                line = self.process.stdout.readline()
+                if line:
+                    self.log_lines.append(line.strip())
+                    # Parse val_bpb from output
+                    if "val_bpb" in line.lower():
+                        try:
+                            parts = line.split()
+                            for i, p in enumerate(parts):
+                                if "val_bpb" in p.lower() and i+1 < len(parts):
+                                    self.current_bpb = float(parts[i+1])
+                                    break
+                        except:
+                            pass
+            
+            # Check if process ended
+            if self.process.poll() is not None and self.status == "running":
+                self.status = "completed"
+                self.cycles_completed += 1
         
-        elapsed = (datetime.now() - self.start_time).total_seconds()
-        cycle_time = elapsed % 300
-        current_cycle = int(elapsed / 300) + 1
-        
-        # Simulate training progress
-        noise = 0.02 * math.sin(elapsed * 0.5)
-        trend = min(0.5, elapsed / 600)
-        self.current_bpb = 1.5 - trend + noise
-        
-        # Check for cycle completion
-        if current_cycle > self.cycles_completed and cycle_time < 5:
-            self.cycles_completed = current_cycle - 1
-        
-        progress = (cycle_time / 300) * 100
+        elapsed = 0
+        if self.start_time:
+            elapsed = (datetime.now() - self.start_time).total_seconds()
         
         return {
-            "status": "running",
+            "status": self.status,
             "elapsed": elapsed,
-            "cycle": current_cycle,
-            "cycles_completed": self.cycles_completed,
-            "progress": progress,
             "bpb": self.current_bpb,
+            "cycles": self.cycles_completed,
+            "logs": "\n".join(self.log_lines[-10:]),  # Last 10 lines
         }
+    
+    def get_final_bpb(self) -> float:
+        """Get final val_bpb from logs."""
+        # Parse logs for final val_bpb
+        for line in reversed(self.log_lines):
+            if "val_bpb" in line.lower():
+                try:
+                    parts = line.split()
+                    for i, p in enumerate(parts):
+                        if "val_bpb" in p.lower() and i+1 < len(parts):
+                            return float(parts[i+1])
+                except:
+                    pass
+        return self.current_bpb or 1.5
 
 
 class AutoresearchGUI:
@@ -153,10 +224,13 @@ class AutoresearchGUI:
         
         exp_id = f"exp_{datetime.now().strftime('%m%d_%H%M%S')}"
         runner = ExperimentRunner(exp_id, model, exp_name)
-        runner.start()
-        self.experiments[exp_id] = runner
+        success, msg = runner.start()
         
-        return f"✅ Started experiment `{exp_name}` with {model_name}"
+        if success:
+            self.experiments[exp_id] = runner
+            return f"✅ Started `{exp_name}` with {model_name}\n{msg}"
+        else:
+            return f"❌ Failed to start: {msg}"
 
     def stop_experiment(self, exp_id: str) -> str:
         """Stop an experiment."""
@@ -168,21 +242,21 @@ class AutoresearchGUI:
         
         # Record experiment
         try:
+            final_bpb = runner.get_final_bpb()
             record = ExperimentRecord(
                 commit=get_current_commit(),
-                val_bpb=runner.current_bpb,
+                val_bpb=final_bpb,
                 memory_mb=1024,
                 status="keep",
                 description=f"GUI: {runner.exp_name} ({runner.model.name})",
                 timestamp=datetime.now().isoformat(),
                 config_snapshot=runner.model.to_dict(),
-                metrics={"val_bpb": runner.current_bpb, "cycles": runner.cycles_completed}
+                metrics={"val_bpb": final_bpb, "cycles": runner.cycles_completed, "pid": runner.pid}
             )
             self.memory.add_experiment(record)
+            return f"⏹️ Stopped {runner.exp_name}\nFinal val_bpb: {final_bpb:.6f}"
         except Exception as e:
-            print(f"Failed to record: {e}")
-        
-        return f"⏹️ Stopped {runner.exp_name}"
+            return f"⏹️ Stopped {runner.exp_name}\nError recording: {e}"
 
     def get_experiment_status(self) -> str:
         """Get status of all experiments."""
@@ -195,16 +269,32 @@ class AutoresearchGUI:
             status = runner.update()
             
             if runner.status == "running":
-                emoji = "🔴"
-                progress_bar = f"<progress value='{status['progress']:.1f}' max='100' style='width: 100%; height: 20px;'></progress>"
+                elapsed = status.get('elapsed', 0)
+                bpb = status.get('bpb', None)
+                bpb_str = f"{bpb:.6f}" if bpb else "N/A"
+                
                 lines.append(f"""
-#### {emoji} {runner.exp_name} ({runner.model.name})
-{progress_bar}
-{status['progress']:.1f}% | Cycle {status['cycle']} | val_bpb: {status['bpb']:.6f}
+#### 🔴 {runner.exp_name} ({runner.model.name})
+
+| Metric | Value |
+|--------|-------|
+| Status | Running (PID: {runner.pid}) |
+| Elapsed | {elapsed:.0f}s |
+| val_bpb | {bpb_str} |
+
+**Recent logs:**
+```
+{status.get('logs', 'Starting...')}
+```
 """)
-            else:
-                emoji = "🟡" if runner.status == "stopped" else "⏸️"
-                lines.append(f"\n#### {emoji} {runner.exp_name} ({runner.model.name}) - {runner.status}\n")
+            elif runner.status == "starting":
+                lines.append(f"\n#### 🟡 {runner.exp_name} ({runner.model.name}) - Starting...\n")
+            elif runner.status == "completed":
+                lines.append(f"\n#### ✅ {runner.exp_name} ({runner.model.name}) - Completed\n")
+            elif runner.status == "stopped":
+                lines.append(f"\n#### ⏹️ {runner.exp_name} ({runner.model.name}) - Stopped\n")
+            elif runner.status == "failed":
+                lines.append(f"\n#### ❌ {runner.exp_name} ({runner.model.name}) - Failed\n")
         
         return "\n".join(lines)
 
@@ -242,10 +332,18 @@ class AutoresearchGUI:
         return "\n".join(rows)
 
     def refresh_all(self) -> tuple:
+        """Refresh all dynamic content."""
+        # Update stop dropdown choices
+        stop_choices = [
+            (f"{r.exp_name} ({r.model.name}) - {r.status}", eid) 
+            for eid, r in self.experiments.items()
+        ]
+        
         return (
             self.get_experiment_status(),
             self.get_experiment_stats(),
-            self.get_recent_experiments()
+            self.get_recent_experiments(),
+            gr.Dropdown(choices=stop_choices, value=None)
         )
 
     def launch(self, share: bool = False):
@@ -304,15 +402,14 @@ class AutoresearchGUI:
             
             exp_status = gr.Markdown(self.get_experiment_status())
             
-            with gr.Row():
-                stop_exp_id = gr.Dropdown(
-                    label="Select Experiment to Stop",
-                    choices=[(f"{r.exp_name} ({r.model.name})", eid) for eid, r in self.experiments.items()],
-                    interactive=True
-                )
-                stop_btn = gr.Button("⏹️ Stop Selected", variant="stop")
+            stop_exp_id = gr.Dropdown(
+                label="Select Experiment to Stop",
+                choices=[],
+                interactive=True
+            )
+            stop_btn = gr.Button("⏹️ Stop Selected", variant="stop")
             
-            stop_status = gr.Textbox(label="Stop Status", interactive=False, max_lines=2)
+            stop_status = gr.Textbox(label="Stop Status", interactive=False, max_lines=3)
             
             stop_btn.click(
                 fn=self.stop_experiment,
@@ -331,14 +428,14 @@ class AutoresearchGUI:
             refresh_btn = gr.Button("🔄 Refresh All", variant="secondary")
             refresh_btn.click(
                 fn=self.refresh_all,
-                outputs=[exp_status, stats_md, recent_md]
+                outputs=[exp_status, stats_md, recent_md, stop_exp_id]
             )
             
             # Auto-refresh every 2 seconds
             timer = gr.Timer(value=2)
             timer.tick(
                 fn=self.refresh_all,
-                outputs=[exp_status, stats_md, recent_md]
+                outputs=[exp_status, stats_md, recent_md, stop_exp_id]
             )
             
             # Footer

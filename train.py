@@ -1,7 +1,7 @@
 """
 Autoresearch pretraining script. Multi-platform support (CUDA/MPS/CPU).
 Enhanced with: Architecture variants, Optimizer zoo, W&B tracking, Checkpointing.
-Usage: uv run train.py
+Usage: uv run train.py [--depth 8] [--aspect-ratio 64] [--batch-size 64] ...
 """
 
 from __future__ import annotations
@@ -10,6 +10,7 @@ import gc
 import time
 import math
 import json
+import argparse
 from dataclasses import dataclass, asdict
 from typing import Optional, Tuple, Dict, Any, List
 from pathlib import Path
@@ -18,17 +19,84 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+# ---------------------------------------------------------------------------
+# Command Line Arguments
+# ---------------------------------------------------------------------------
+
+def parse_args():
+    parser = argparse.ArgumentParser(description="Autoresearch training script")
+    
+    # Model architecture
+    parser.add_argument("--depth", type=int, default=None, help="Number of transformer layers")
+    parser.add_argument("--aspect-ratio", type=int, default=None, help="Aspect ratio for model dim")
+    parser.add_argument("--head-dim", type=int, default=128, help="Attention head dimension")
+    parser.add_argument("--batch-size", type=int, default=None, help="Device batch size")
+    parser.add_argument("--seq-len", type=int, default=None, help="Sequence length")
+    parser.add_argument("--optimizer", type=str, default=None, help="Optimizer type")
+    parser.add_argument("--experiment-name", type=str, default=None, help="Experiment name for logging")
+    
+    # Architecture variants
+    parser.add_argument("--use-moe", action="store_true", help="Enable Mixture of Experts")
+    parser.add_argument("--moe-experts", type=int, default=4, help="Number of MoE experts")
+    parser.add_argument("--use-gqa", action="store_true", help="Enable Grouped Query Attention")
+    parser.add_argument("--use-swiglu", action="store_true", help="Enable SwiGLU activation")
+    parser.add_argument("--use-prenorm", action="store_true", help="Enable pre-norm architecture")
+    
+    # Training
+    parser.add_argument("--time-budget", type=int, default=None, help="Training time budget in seconds")
+    parser.add_argument("--lr", type=float, default=None, help="Learning rate")
+    
+    return parser.parse_args()
+
+# Parse arguments
+args = parse_args()
+
 # Import configuration
 from config import ExperimentConfig, DEFAULT_CONFIG
 
-# Platform-specific setup
+# Load base config and override with CLI args
 config = ExperimentConfig()
+
+# Apply CLI overrides
+if args.depth is not None:
+    config.model.depth = args.depth
+if args.aspect_ratio is not None:
+    config.model.aspect_ratio = args.aspect_ratio
+if args.head_dim is not None:
+    config.model.head_dim = args.head_dim
+if args.batch_size is not None:
+    config.training.device_batch_size = args.batch_size
+if args.seq_len is not None:
+    config.training.max_seq_len = args.seq_len
+if args.optimizer is not None:
+    config.optimizer.optimizer_type = args.optimizer
+if args.time_budget is not None:
+    config.training.time_budget = args.time_budget
+
+# Architecture variants from CLI
+if args.use_moe:
+    config.model.use_moe = True
+    config.model.moe_num_experts = args.moe_experts
+if args.use_gqa:
+    config.model.use_gqa = True
+if args.use_swiglu:
+    config.model.use_swiglu = True
+if args.use_prenorm:
+    config.model.use_prenorm = True
+
+# Platform-specific setup
 DEVICE = config.device.get_device()
 DTYPE = config.device.get_torch_dtype()
 PEAK_FLOPS = config.device.get_peak_flops()
 
 print(f"Using device: {DEVICE}")
 print(f"Using dtype: {DTYPE}")
+print(f"Model config: depth={config.model.depth}, aspect_ratio={config.model.aspect_ratio}")
+print(f"Batch size: {config.training.device_batch_size}, seq_len: {config.training.max_seq_len}")
+print(f"Architecture: MoE={config.model.use_moe}, GQA={config.model.use_gqa}, SwiGLU={config.model.use_swiglu}")
+print(f"Optimizer: {config.optimizer.optimizer_type}")
+if args.experiment_name:
+    print(f"Experiment: {args.experiment_name}")
 
 # Memory-efficient settings for MPS (target: 8GB VRAM)
 if DEVICE == "mps":
