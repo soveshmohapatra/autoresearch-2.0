@@ -203,36 +203,36 @@ Training is running in the background. Check the logs for progress.
     
     def launch(self, share: bool = False):
         """Launch the Gradio interface."""
-        
-        with gr.Blocks(title="Autoresearch Dashboard", theme=gr.themes.Base()) as demo:
+
+        with gr.Blocks(title="Autoresearch Dashboard") as demo:
             gr.Markdown("# 🧠 Autoresearch Dashboard")
             gr.Markdown("Autonomous AI research with intelligent hardware detection")
-            
+
             # Hardware Detection Section
             with gr.Row():
                 with gr.Column(scale=2):
                     hardware_html = gr.HTML(self.get_hardware_info_html())
                     config_html = gr.HTML(self.get_recommended_config_html())
-                
+
                 with gr.Column(scale=1):
                     gr.Markdown("### ⚡ Quick Actions")
                     detect_btn = gr.Button("🔍 Re-detect Hardware", variant="primary")
                     apply_btn = gr.Button("📝 Apply Recommended Config", variant="secondary")
                     status_text = gr.Textbox(label="Status", interactive=False)
-            
+
             detect_btn.click(
                 fn=self.detect_and_configure,
                 outputs=[hardware_html, config_html, status_text]
             )
-            
+
             apply_btn.click(
                 fn=self.apply_recommended_config,
                 outputs=[status_text]
             )
-            
+
             # Training Control Section
             gr.Markdown("## 🎮 Training Control")
-            
+
             with gr.Row():
                 with gr.Column():
                     exp_name = gr.Textbox(
@@ -247,19 +247,19 @@ Training is running in the background. Check the logs for progress.
                         value=300,
                         step=60
                     )
-                    
+
                     with gr.Row():
                         start_btn = gr.Button("▶️ Start Training", variant="primary")
                         stop_btn = gr.Button("⏹️ Stop Training", variant="stop")
-                
+
                 with gr.Column():
                     status_display = gr.Markdown(self.get_training_status())
-            
-            # Auto-refresh status
-            demo.load(
+                    refresh_timer = gr.Timer(value=5)
+
+            # Auto-refresh status using Timer (Gradio 6.0 compatible)
+            refresh_timer.tick(
                 fn=lambda: self.get_training_status(),
-                outputs=[status_display],
-                every=5
+                outputs=[status_display]
             )
             
             start_btn.click(
@@ -314,9 +314,9 @@ Training is running in the background. Check the logs for progress.
             ---
             **Autoresearch** - Autonomous AI Research System
             """)
-        
+
         # Launch
-        demo.launch(share=share, server_name="0.0.0.0")
+        demo.launch(share=share, server_name="0.0.0.0", theme=gr.themes.Base())
 
 
 def main():
