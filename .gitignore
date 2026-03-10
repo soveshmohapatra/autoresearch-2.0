@@ -1,0 +1,37 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv/
+worktrees/
+results/
+queue/
+
+# Testing
+.pytest_cache/
+
+# Agent prompt files (generated per-session by launchers)
+CLAUDE.md
+AGENTS.md
+
+# Experimental code/artifacts
+dev/
+
+# Results file
+results.tsv
+
+# Configuration files (auto-generated)
+auto_config.json
+checkpoints/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+

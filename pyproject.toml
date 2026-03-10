@@ -1,0 +1,34 @@
+[project]
+name = "autoresearch"
+version = "0.1.0"
+description = "Autonomous pretraining research swarm"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "matplotlib>=3.10.8",
+    "numpy>=2.2.6",
+    "pandas>=2.3.3",
+    "pyarrow>=21.0.0",
+    "requests>=2.32.0",
+    "rustbpe>=0.1.0",
+    "tiktoken>=0.11.0",
+    "torch>=2.5.0",
+    "wandb>=0.19.0",
+    "pytest>=8.0.0",
+    "gradio>=4.0.0",
+]
+
+# CUDA-specific dependencies for Linux/Windows with NVIDIA GPUs
+[project.optional-dependencies]
+cuda = [
+    "kernels>=0.11.7",
+]
+
+[tool.uv]
+# PyTorch will auto-detect and install appropriate version for platform
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = "test_*.py"
+python_classes = "Test*"
+python_functions = "test_*"
