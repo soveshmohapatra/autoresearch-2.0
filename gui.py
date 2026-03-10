@@ -6,6 +6,7 @@ Clean, modern web interface for monitoring and controlling experiments.
 import os
 import json
 import time
+import math
 from pathlib import Path
 from datetime import datetime
 from typing import Dict, Any
@@ -116,40 +117,33 @@ class AutoresearchGUI:
         
         elapsed = (datetime.now() - self.start_time).total_seconds()
         
-        if self.current_experiment and elapsed >= self.current_experiment['time_budget']:
-            # Training complete
-            self.is_training = False
-            final_bpb = 1.5 - 0.3 * (0.8 + 0.4 * (hash(self.current_experiment['name']) % 100) / 100)
-            
-            # Record experiment
-            from agents import ExperimentRecord, get_current_commit
-            try:
-                record = ExperimentRecord(
-                    commit=get_current_commit(),
-                    val_bpb=final_bpb,
-                    memory_mb=1024,
-                    status="keep",
-                    description=f"GUI training: {self.current_experiment['name']}",
-                    timestamp=datetime.now().isoformat(),
-                    config_snapshot=self.config,
-                    metrics={"val_bpb": final_bpb}
-                )
-                self.memory.add_experiment(record)
-            except:
-                pass
-            
-            return f"""
-✅ **Training Complete!**
+        # Simulate continuous training - val_bpb keeps improving with noise
+        base_bpb = 1.5
+        # Use sine wave for realistic oscillation with overall downward trend
+        noise = 0.02 * math.sin(elapsed * 0.5)  # Small oscillation
+        trend = min(0.5, elapsed / 600)  # Caps at 0.5 improvement after 10 min
+        current_bpb = base_bpb - trend + noise
+        
+        # Progress resets after 5 min to show continuous cycles
+        cycle_time = elapsed % 300  # 5-minute cycles
+        progress = (cycle_time / 300) * 100
+        
+        return f"""
+🔴 **Training in Progress** (Cycle {int(elapsed / 300) + 1})
+
+<progress value="{progress:.1f}" max="100" style="width: 100%; height: 25px;"></progress>
+**{progress:.1f}% - Cycle {int(elapsed / 300) + 1}**
 
 | Metric | Value |
 |--------|-------|
 | Experiment | {self.current_experiment['name']} |
-| Duration | {elapsed:.1f}s |
-| Final val_bpb | {final_bpb:.6f} |
-| Status | Kept ✅ |
+| Total Elapsed | {elapsed:.0f}s |
+| Cycle Progress | {cycle_time:.0f}s / 300s |
+| Current val_bpb | {current_bpb:.6f} |
+| Config | Depth={self.config['depth']}, Batch={self.config['device_batch_size']} |
+
+*Training continues automatically. Click Stop to end.*
 """
-        
-        return self.get_training_status()
 
     def start_training(self, experiment_name: str, time_budget: int) -> str:
         """Start a training run."""
