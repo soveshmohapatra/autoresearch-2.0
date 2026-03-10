@@ -290,11 +290,13 @@ class AutoresearchGUI:
 
                 with gr.Column(scale=1):
                     status_display = gr.Markdown(self.get_training_status())
-                    progress_timer = gr.Timer(value=1, active=False)
+                    timer_state = gr.State(value=False)
+                    progress_timer = gr.Timer(value=1)
 
-            # Auto-update progress during training
+            # Auto-update progress during training (runs continuously, checks state)
             progress_timer.tick(
-                fn=self.update_training_progress,
+                fn=lambda is_running: (self.update_training_progress() if is_running else self.get_training_status()),
+                inputs=[timer_state],
                 outputs=[status_display]
             )
             
@@ -349,16 +351,16 @@ class AutoresearchGUI:
                 inputs=[exp_name, time_budget],
                 outputs=[status_display]
             ).then(
-                fn=lambda: gr.Timer(active=True),
-                outputs=[progress_timer]
+                fn=lambda: True,
+                outputs=[timer_state]
             )
 
             stop_btn.click(
                 fn=self.stop_training,
                 outputs=[status_display]
             ).then(
-                fn=lambda: gr.Timer(active=False),
-                outputs=[progress_timer]
+                fn=lambda: False,
+                outputs=[timer_state]
             )
             
             refresh_btn.click(
