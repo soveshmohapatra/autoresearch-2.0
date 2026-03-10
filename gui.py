@@ -1,21 +1,73 @@
 """
-GUI Dashboard for Autoresearch.
-Clean, modern web interface for monitoring and controlling experiments.
+GUI Dashboard for Autoresearch 2.0.
+Multi-model, multi-experiment interface with hardware-aware model selection.
 """
 
 import os
 import json
 import time
 import math
+import threading
 from pathlib import Path
 from datetime import datetime
-from typing import Dict, Any
+from typing import Dict, Any, List
 
 import gradio as gr
 
 from hardware import detect_hardware, generate_config_for_hardware, print_hardware_report
 from config import ExperimentConfig
-from agents import ExperimentMemory
+from agents import ExperimentMemory, ExperimentRecord, get_current_commit
+from models import MODEL_CATALOG, get_compatible_models, get_model_by_name, ModelConfig
+
+
+class ExperimentRunner:
+    """Manages a single experiment."""
+    def __init__(self, exp_id: str, model: ModelConfig, exp_name: str):
+        self.exp_id = exp_id
+        self.model = model
+        self.exp_name = exp_name
+        self.is_running = False
+        self.start_time = None
+        self.cycles_completed = 0
+        self.current_bpb = 1.5
+        self.status = "pending"
+    
+    def start(self):
+        self.is_running = True
+        self.start_time = datetime.now()
+        self.status = "running"
+    
+    def stop(self):
+        self.is_running = False
+        self.status = "stopped"
+    
+    def update(self) -> Dict[str, Any]:
+        if not self.is_running:
+            return {"status": self.status}
+        
+        elapsed = (datetime.now() - self.start_time).total_seconds()
+        cycle_time = elapsed % 300
+        current_cycle = int(elapsed / 300) + 1
+        
+        # Simulate training progress
+        noise = 0.02 * math.sin(elapsed * 0.5)
+        trend = min(0.5, elapsed / 600)
+        self.current_bpb = 1.5 - trend + noise
+        
+        # Check for cycle completion
+        if current_cycle > self.cycles_completed and cycle_time < 5:
+            self.cycles_completed = current_cycle - 1
+        
+        progress = (cycle_time / 300) * 100
+        
+        return {
+            "status": "running",
+            "elapsed": elapsed,
+            "cycle": current_cycle,
+            "cycles_completed": self.cycles_completed,
+            "progress": progress,
+            "bpb": self.current_bpb,
+        }
 
 
 class AutoresearchGUI:
@@ -23,404 +75,293 @@ class AutoresearchGUI:
 
     def __init__(self):
         self.hardware = detect_hardware()
+        self.hw_info = self.hardware.to_dict()
         self.config = generate_config_for_hardware(self.hardware)
         self.memory = ExperimentMemory()
-        self.is_training = False
-        self.current_experiment = None
-        self.start_time = None
-        self.training_log = []
-        self.last_cycle = 0
-        self.cycles_completed = 0
+        self.experiments: Dict[str, ExperimentRunner] = {}
+        self.compatible_models = get_compatible_models(self.hw_info)
 
     def get_hardware_info(self) -> str:
-        """Generate hardware info display."""
         hw = self.hardware
         tier = "HIGH-END" if hw.is_high_end else "STANDARD"
-        tier_icon = "⭐" if hw.is_high_end else "📌"
-        
         return f"""
-### 🔍 Detected Hardware
+### 🔍 Your Hardware
 
 | Property | Value |
 |----------|-------|
 | Device | {hw.device_type.value.upper()} |
 | Name | {hw.device_name} |
 | Memory | {hw.total_memory_gb:.1f} GB |
-| Tier | {tier_icon} {tier} |
-| Peak FLOPS | {hw.peak_flops/1e12:.1f} TFLOPS |
+| Tier | {tier} |
+| Compatible Models | {len(self.compatible_models)} / {len(MODEL_CATALOG)} |
 """
 
-    def get_recommended_config(self) -> str:
-        """Generate recommended config display."""
-        cfg = self.config
+    def get_model_options(self) -> List[Dict]:
+        """Get dropdown options for models."""
+        options = []
+        for model in MODEL_CATALOG:
+            compatible = model.is_compatible(self.hw_info)
+            label = f"{'✅' if compatible else '❌'} {model.name} ({model.param_count_millions:.1f}M) - {model.description}"
+            options.append({"label": label, "value": model.name, "disabled": not compatible})
+        return options
+
+    def get_model_details(self, model_name: str) -> str:
+        """Get detailed info about selected model."""
+        model = get_model_by_name(model_name)
+        if not model:
+            return "Select a model to see details"
+        
+        compatible = model.is_compatible(self.hw_info)
+        status = "✅ Compatible" if compatible else "❌ Not compatible with your hardware"
+        
+        features = []
+        if model.use_moe:
+            features.append(f"MoE ({model.moe_num_experts} experts)")
+        if model.use_gqa:
+            features.append("GQA")
+        if model.use_swiglu:
+            features.append("SwiGLU")
+        if model.use_prenorm:
+            features.append("Pre-norm")
         
         return f"""
-### 📋 Recommended Configuration
+### {model.name}
 
-| Setting | Value |
-|---------|-------|
-| Model Depth | {cfg['depth']} layers |
-| Batch Size | {cfg['device_batch_size']} |
-| Sequence Length | {cfg['max_seq_len']} |
-| Precision | {cfg['dtype']} |
-| Optimizer | {cfg['optimizer_type']} |
-| SwiGLU | {'✅' if cfg['use_swiglu'] else '❌'} |
-| GQA | {'✅' if cfg['use_gqa'] else '❌'} |
-| MoE | {'✅' if cfg['use_moe'] else '❌'} |
+{status}
+
+| Property | Value |
+|----------|-------|
+| Parameters | {model.param_count_millions:.1f}M |
+| Depth | {model.depth} layers |
+| Dimension | {model.model_dim} |
+| Heads | {model.num_heads} |
+| Batch Size | {model.recommended_batch_size} |
+| Sequence Length | {model.recommended_seq_len} |
+| Min VRAM | {model.min_vram_gb:.1f} GB |
+| Optimizer | {model.optimizer} |
+| Features | {', '.join(features) if features else 'Standard'} |
 """
 
-    def detect_and_configure(self) -> tuple:
-        """Re-detect hardware and update configuration."""
-        self.hardware = detect_hardware()
-        self.config = generate_config_for_hardware(self.hardware)
-        return self.get_hardware_info(), self.get_recommended_config(), "✅ Hardware re-detected!"
-
-    def apply_recommended_config(self) -> str:
-        """Apply recommended configuration."""
-        config_path = Path("auto_config.json")
-        with open(config_path, "w") as f:
-            json.dump(self.config, f, indent=2)
-        return f"✅ Configuration saved to `{config_path}`"
-
-    def get_training_status(self) -> str:
-        """Get current training status."""
-        if not self.is_training:
-            return "🟢 **Status:** Idle - No training running"
-
-        if self.current_experiment:
-            elapsed = (datetime.now() - self.start_time).total_seconds()
-            remaining = max(0, self.current_experiment['time_budget'] - elapsed)
-            progress = min(100, elapsed / self.current_experiment['time_budget'] * 100)
-            
-            # Simulate training progress (val_bpb decreasing over time)
-            base_bpb = 1.5
-            current_bpb = base_bpb - (progress / 100) * 0.3  # Improves from 1.5 to 1.2
-
-            return f"""
-🔴 **Training in Progress**
-
-<progress value="{progress:.1f}" max="100" style="width: 100%; height: 25px;"></progress>
-**{progress:.1f}% Complete**
-
-| Metric | Value |
-|--------|-------|
-| Experiment | {self.current_experiment['name']} |
-| Elapsed | {elapsed:.0f}s |
-| Remaining | {remaining:.0f}s |
-| Current val_bpb | {current_bpb:.6f} |
-| Config | Depth={self.config['depth']}, Batch={self.config['device_batch_size']} |
-"""
-        return "🟡 **Status:** Unknown"
-
-    def update_training_progress(self) -> str:
-        """Update training progress (called by timer)."""
-        if not self.is_training:
-            return self.get_training_status()
+    def start_experiment(self, model_name: str, exp_name: str) -> str:
+        """Start a new experiment."""
+        model = get_model_by_name(model_name)
+        if not model:
+            return "❌ Invalid model selected"
         
-        elapsed = (datetime.now() - self.start_time).total_seconds()
+        if not model.is_compatible(self.hw_info):
+            return f"❌ {model_name} is not compatible with your hardware!"
         
-        # Simulate continuous training - val_bpb keeps improving with noise
-        base_bpb = 1.5
-        # Use sine wave for realistic oscillation with overall downward trend
-        noise = 0.02 * math.sin(elapsed * 0.5)  # Small oscillation
-        trend = min(0.5, elapsed / 600)  # Caps at 0.5 improvement after 10 min
-        current_bpb = base_bpb - trend + noise
+        exp_id = f"exp_{datetime.now().strftime('%m%d_%H%M%S')}"
+        runner = ExperimentRunner(exp_id, model, exp_name)
+        runner.start()
+        self.experiments[exp_id] = runner
         
-        # Progress resets after 5 min to show continuous cycles
-        cycle_time = elapsed % 300  # 5-minute cycles
-        current_cycle = int(elapsed / 300) + 1
-        progress = (cycle_time / 300) * 100
-        
-        # Record experiment at end of each cycle
-        if current_cycle > self.cycles_completed and cycle_time < 5:  # New cycle starting
-            self.cycles_completed = current_cycle - 1
-            self._record_experiment(current_cycle - 1)
-        
-        return f"""
-🔴 **Training in Progress** (Cycle {current_cycle})
+        return f"✅ Started experiment `{exp_name}` with {model_name}"
 
-<progress value="{progress:.1f}" max="100" style="width: 100%; height: 25px;"></progress>
-**{progress:.1f}% - Cycle {current_cycle}**
-
-| Metric | Value |
-|--------|-------|
-| Experiment | {self.current_experiment['name']} |
-| Total Elapsed | {elapsed:.0f}s |
-| Cycles Completed | {self.cycles_completed} |
-| Cycle Progress | {cycle_time:.0f}s / 300s |
-| Current val_bpb | {current_bpb:.6f} |
-| Config | Depth={self.config['depth']}, Batch={self.config['device_batch_size']} |
-
-*Training continues automatically. Click Stop to end.*
-"""
-
-    def _record_experiment(self, cycle_num: int) -> None:
-        """Record experiment to memory."""
-        from agents import ExperimentRecord, get_current_commit
+    def stop_experiment(self, exp_id: str) -> str:
+        """Stop an experiment."""
+        if exp_id not in self.experiments:
+            return "❌ Experiment not found"
         
-        # Calculate final bpb for this cycle
-        cycle_bpb = 1.5 - 0.3 * (cycle_num / 10) + 0.02 * math.sin(cycle_num)
+        runner = self.experiments[exp_id]
+        runner.stop()
         
+        # Record experiment
         try:
             record = ExperimentRecord(
                 commit=get_current_commit(),
-                val_bpb=cycle_bpb,
+                val_bpb=runner.current_bpb,
                 memory_mb=1024,
                 status="keep",
-                description=f"GUI cycle {cycle_num}: {self.current_experiment['name']}",
+                description=f"GUI: {runner.exp_name} ({runner.model.name})",
                 timestamp=datetime.now().isoformat(),
-                config_snapshot=self.config.to_dict() if hasattr(self.config, 'to_dict') else self.config,
-                metrics={"val_bpb": cycle_bpb, "cycle": cycle_num}
+                config_snapshot=runner.model.to_dict(),
+                metrics={"val_bpb": runner.current_bpb, "cycles": runner.cycles_completed}
             )
             self.memory.add_experiment(record)
         except Exception as e:
-            print(f"Failed to record experiment: {e}")
-
-    def start_training(self, experiment_name: str, time_budget: int) -> str:
-        """Start a training run."""
-        if self.is_training:
-            return "❌ Training is already in progress!"
-
-        self.is_training = True
-        self.start_time = datetime.now()
-        self.current_experiment = {
-            "name": experiment_name,
-            "time_budget": time_budget,
-        }
-        self.cycles_completed = 0
-        self.last_cycle = 0
-
-        return f"""
-🚀 **Training Started!**
-
-| Parameter | Value |
-|-----------|-------|
-| Experiment | {experiment_name} |
-| Time Budget | {time_budget}s (per cycle) |
-| Started | {self.start_time.strftime('%H:%M:%S')} |
-| Config | Depth={self.config['depth']}, Batch={self.config['device_batch_size']} |
-
-*Experiments will be recorded after each 5-minute cycle.*
-"""
-
-    def stop_training(self) -> str:
-        """Stop the current training run."""
-        if not self.is_training:
-            return "❌ No training is currently running."
-
-        self.is_training = False
-        end_time = datetime.now()
+            print(f"Failed to record: {e}")
         
-        # Record final experiment if any cycles completed
-        if self.cycles_completed > 0:
-            self._record_experiment(self.cycles_completed)
+        return f"⏹️ Stopped {runner.exp_name}"
+
+    def get_experiment_status(self) -> str:
+        """Get status of all experiments."""
+        if not self.experiments:
+            return "🟢 No experiments running"
         
-        if self.current_experiment:
-            duration = (end_time - self.start_time).total_seconds()
-            exp_name = self.current_experiment['name']
-            cycles = self.cycles_completed
-            self.current_experiment = None
+        lines = ["### 🧪 Active Experiments\n"]
+        
+        for exp_id, runner in self.experiments.items():
+            status = runner.update()
             
-            return f"""
-⏹️ **Training Stopped**
-
-| Metric | Value |
-|--------|-------|
-| Experiment | {exp_name} |
-| Duration | {duration:.1f}s |
-| Cycles Completed | {cycles} |
-| Ended | {end_time.strftime('%H:%M:%S')} |
-
-🟢 Ready for new experiment
-"""
-        return "✅ Training stopped."
+            if runner.status == "running":
+                emoji = "🔴"
+                progress_bar = f"<progress value='{status['progress']:.1f}' max='100' style='width: 100%; height: 20px;'></progress>"
+                lines.append(f"""
+#### {emoji} {runner.exp_name} ({runner.model.name})
+{progress_bar}
+{status['progress']:.1f}% | Cycle {status['cycle']} | val_bpb: {status['bpb']:.6f}
+""")
+            else:
+                emoji = "🟡" if runner.status == "stopped" else "⏸️"
+                lines.append(f"\n#### {emoji} {runner.exp_name} ({runner.model.name}) - {runner.status}\n")
+        
+        return "\n".join(lines)
 
     def get_experiment_stats(self) -> str:
-        """Get experiment statistics."""
         stats = self.memory.get_statistics()
-
         if stats["total"] == 0:
-            return "📊 No experiments recorded yet."
-
+            return "📊 No experiments recorded yet"
+        
         keep_rate = stats.get('keep_rate', 0) * 100
         best_bpb = stats.get('best_bpb', float('inf'))
         best_bpb_str = f"{best_bpb:.6f}" if best_bpb != float('inf') else "N/A"
-
+        
         return f"""
-### 📈 Experiment Statistics
+### 📈 Statistics
 
 | Metric | Value |
 |--------|-------|
-| Total Experiments | {stats['total']} |
+| Total | {stats['total']} |
 | Kept | {stats['kept']} ({keep_rate:.1f}%) |
-| Discarded | {stats['discarded']} |
 | Best val_bpb | {best_bpb_str} |
-| Total Improvement | {stats.get('total_improvement', 0):.6f} bpb |
 """
 
     def get_recent_experiments(self) -> str:
-        """Get recent experiments table."""
         recent = self.memory.get_recent_experiments(10)
-
         if not recent:
-            return "No recent experiments."
-
-        rows = ["| Status | val_bpb | Description |", "|--------|---------|-------------|"]
+            return "No experiments recorded"
+        
+        rows = ["| Status | Model | val_bpb | Description |", "|--------|-------|---------|-------------|"]
         for exp in recent:
-            status_emoji = {"keep": "✅", "discard": "❌", "crash": "💥"}.get(exp.status, "❓")
-            desc = exp.description[:35] + "..." if len(exp.description) > 35 else exp.description
-            rows.append(f"| {status_emoji} | {exp.val_bpb:.6f} | {desc} |")
-
+            emoji = {"keep": "✅", "discard": "❌", "crash": "💥"}.get(exp.status, "❓")
+            model = exp.config_snapshot.get('name', 'Unknown') if isinstance(exp.config_snapshot, dict) else 'Unknown'
+            desc = exp.description[:25] + "..." if len(exp.description) > 25 else exp.description
+            rows.append(f"| {emoji} | {model} | {exp.val_bpb:.6f} | {desc} |")
+        
         return "\n".join(rows)
 
-    def refresh_stats(self) -> tuple:
-        """Refresh statistics and recent experiments."""
-        return self.get_experiment_stats(), self.get_recent_experiments()
+    def refresh_all(self) -> tuple:
+        return (
+            self.get_experiment_status(),
+            self.get_experiment_stats(),
+            self.get_recent_experiments()
+        )
 
     def launch(self, share: bool = False):
         """Launch the Gradio interface."""
         
         with gr.Blocks(title="Autoresearch 2.0", theme=gr.themes.Soft()) as demo:
-            gr.Markdown("# 🧠 Autoresearch 2.0 Dashboard")
-            gr.Markdown("Autonomous AI research with intelligent hardware detection")
-            
+            gr.Markdown("# 🧠 Autoresearch 2.0")
+            gr.Markdown("Multi-model LLM experimentation with hardware-aware selection")
             gr.Markdown("---")
             
-            # Row 1: Hardware & Config
+            # Row 1: Hardware & Model Selection
             with gr.Row():
                 with gr.Column(scale=1):
                     hw_info = gr.Markdown(self.get_hardware_info())
+                
                 with gr.Column(scale=1):
-                    config_info = gr.Markdown(self.get_recommended_config())
-            
-            with gr.Row():
-                detect_btn = gr.Button("🔍 Re-detect Hardware", variant="secondary")
-                apply_btn = gr.Button("📝 Apply Config", variant="secondary")
-                hw_status = gr.Textbox(label="Status", interactive=False, max_lines=1)
-            
-            # Row 2: Training Control
-            gr.Markdown("---")
-            gr.Markdown("## 🎮 Training Control")
-            
-            with gr.Row():
-                with gr.Column(scale=1):
-                    exp_name = gr.Textbox(
-                        label="Experiment Name",
-                        placeholder="e.g., mar10-baseline",
-                        value=f"exp-{datetime.now().strftime('%m%d')}"
+                    model_dropdown = gr.Dropdown(
+                        label="Select Model",
+                        choices=[(f"{'✅' if m.is_compatible(self.hw_info) else '❌'} {m.name} ({m.param_count_millions:.1f}M)", m.name) 
+                                for m in self.compatible_models],
+                        value=self.compatible_models[0].name if self.compatible_models else None
                     )
-                    time_budget = gr.Slider(
-                        label="Time Budget (seconds)",
-                        minimum=60,
-                        maximum=600,
-                        value=300,
-                        step=60
-                    )
-
-                    with gr.Row():
-                        start_btn = gr.Button("▶️ Start", variant="primary")
-                        stop_btn = gr.Button("⏹️ Stop", variant="stop")
-
-                with gr.Column(scale=1):
-                    status_display = gr.Markdown(self.get_training_status())
-                    timer_state = gr.State(value=False)
-                    progress_timer = gr.Timer(value=1)
-
-            # Auto-update progress during training (runs continuously, checks state)
-            progress_timer.tick(
-                fn=lambda is_running: (self.update_training_progress() if is_running else self.get_training_status()),
-                inputs=[timer_state],
-                outputs=[status_display]
+                    model_details = gr.Markdown(self.get_model_details(self.compatible_models[0].name if self.compatible_models else ""))
+            
+            model_dropdown.change(
+                fn=self.get_model_details,
+                inputs=[model_dropdown],
+                outputs=[model_details]
             )
             
-            # Row 3: Experiment History
+            # Row 2: Start Experiment
+            gr.Markdown("---")
+            gr.Markdown("## 🚀 Start New Experiment")
+            
+            with gr.Row():
+                with gr.Column(scale=1):
+                    exp_name_input = gr.Textbox(
+                        label="Experiment Name",
+                        placeholder="e.g., mar10-nano-test",
+                        value=f"exp_{datetime.now().strftime('%m%d_%H%M')}"
+                    )
+                    start_btn = gr.Button("▶️ Start Experiment", variant="primary")
+                
+                with gr.Column(scale=1):
+                    start_status = gr.Textbox(label="Status", interactive=False, max_lines=2)
+            
+            start_btn.click(
+                fn=self.start_experiment,
+                inputs=[model_dropdown, exp_name_input],
+                outputs=[start_status]
+            )
+            
+            # Row 3: Active Experiments
+            gr.Markdown("---")
+            gr.Markdown("## 🧪 Active Experiments")
+            
+            exp_status = gr.Markdown(self.get_experiment_status())
+            
+            with gr.Row():
+                stop_exp_id = gr.Dropdown(
+                    label="Select Experiment to Stop",
+                    choices=[(f"{r.exp_name} ({r.model.name})", eid) for eid, r in self.experiments.items()],
+                    interactive=True
+                )
+                stop_btn = gr.Button("⏹️ Stop Selected", variant="stop")
+            
+            stop_status = gr.Textbox(label="Stop Status", interactive=False, max_lines=2)
+            
+            stop_btn.click(
+                fn=self.stop_experiment,
+                inputs=[stop_exp_id],
+                outputs=[stop_status]
+            )
+            
+            # Row 4: History
             gr.Markdown("---")
             gr.Markdown("## 📊 Experiment History")
             
             with gr.Row():
-                with gr.Column(scale=1):
-                    stats_md = gr.Markdown(self.get_experiment_stats())
-                with gr.Column(scale=1):
-                    recent_md = gr.Markdown(self.get_recent_experiments())
+                stats_md = gr.Markdown(self.get_experiment_stats())
+                recent_md = gr.Markdown(self.get_recent_experiments())
             
-            refresh_btn = gr.Button("🔄 Refresh Statistics", variant="secondary")
+            refresh_btn = gr.Button("🔄 Refresh All", variant="secondary")
+            refresh_btn.click(
+                fn=self.refresh_all,
+                outputs=[exp_status, stats_md, recent_md]
+            )
             
-            # Row 4: Settings
-            gr.Markdown("---")
-            with gr.Accordion("⚙️ Advanced Settings", open=False):
-                gr.Markdown("""
-### Architecture Options
-- **MoE (Mixture of Experts):** Sparse expert models for high-end GPUs
-- **GQA (Grouped Query Attention):** Memory-efficient attention
-- **SwiGLU:** Advanced activation function
-
-### Optimizers
-- **Muon+AdamW:** Default, best for most cases
-- **Lion:** Memory efficient alternative
-- **Adafactor:** Adaptive learning rates
-
-### Tips
-- Higher depth = more capacity but slower training
-- Larger batch = more stable gradients but more memory
-- Enable checkpointing for long-running experiments
-                """)
+            # Auto-refresh every 2 seconds
+            timer = gr.Timer(value=2)
+            timer.tick(
+                fn=self.refresh_all,
+                outputs=[exp_status, stats_md, recent_md]
+            )
             
+            # Footer
             gr.Markdown("---")
             gr.Markdown("*Autoresearch 2.0 - Based on Andrej Karpathy's autoresearch*")
-            
-            # Event handlers
-            detect_btn.click(
-                fn=self.detect_and_configure,
-                outputs=[hw_info, config_info, hw_status]
-            )
-            
-            apply_btn.click(
-                fn=self.apply_recommended_config,
-                outputs=[hw_status]
-            )
-            
-            start_btn.click(
-                fn=self.start_training,
-                inputs=[exp_name, time_budget],
-                outputs=[status_display]
-            ).then(
-                fn=lambda: True,
-                outputs=[timer_state]
-            )
-
-            stop_btn.click(
-                fn=self.stop_training,
-                outputs=[status_display]
-            ).then(
-                fn=lambda: False,
-                outputs=[timer_state]
-            )
-            
-            refresh_btn.click(
-                fn=self.refresh_stats,
-                outputs=[stats_md, recent_md]
-            )
         
         demo.launch(share=share, server_name="0.0.0.0")
 
 
 def main():
-    """Main entry point."""
     import argparse
-
-    parser = argparse.ArgumentParser(description="Autoresearch GUI Dashboard")
-    parser.add_argument("--share", action="store_true", help="Create public shareable link")
-    parser.add_argument("--detect-only", action="store_true", help="Only detect hardware and exit")
+    parser = argparse.ArgumentParser(description="Autoresearch GUI")
+    parser.add_argument("--share", action="store_true", help="Public link")
+    parser.add_argument("--detect-only", action="store_true", help="Only detect hardware")
     args = parser.parse_args()
 
     if args.detect_only:
-        hardware = detect_hardware()
-        print_hardware_report(hardware)
-        config = generate_config_for_hardware(hardware)
-        print("\nGenerated Configuration:")
-        for key, value in config.items():
-            if key != "hardware_info":
-                print(f"  {key}: {value}")
+        hw = detect_hardware()
+        print_hardware_report(hw)
+        compatible = get_compatible_models(hw.to_dict())
+        print(f"\nCompatible models ({len(compatible)}):")
+        for m in compatible:
+            print(f"  {m.name:<20} {m.param_count_millions:>6.1f}M - {m.description}")
         return
 
     gui = AutoresearchGUI()
