@@ -204,21 +204,26 @@ Training is running in the background. Check the logs for progress.
     def launch(self, share: bool = False):
         """Launch the Gradio interface."""
 
-        with gr.Blocks(title="Autoresearch Dashboard") as demo:
+        with gr.Blocks(title="Autoresearch Dashboard", css="""
+            .gradio-container { max-width: 1400px !important; }
+            .markdown { margin-bottom: 10px; }
+            .gr-button { margin: 5px 0; }
+        """) as demo:
             gr.Markdown("# 🧠 Autoresearch Dashboard")
             gr.Markdown("Autonomous AI research with intelligent hardware detection")
 
             # Hardware Detection Section
-            with gr.Row():
-                with gr.Column(scale=2):
-                    hardware_html = gr.HTML(self.get_hardware_info_html())
-                    config_html = gr.HTML(self.get_recommended_config_html())
+            with gr.Group():
+                with gr.Row():
+                    with gr.Column(scale=2):
+                        hardware_html = gr.HTML(self.get_hardware_info_html())
+                        config_html = gr.HTML(self.get_recommended_config_html())
 
-                with gr.Column(scale=1):
-                    gr.Markdown("### ⚡ Quick Actions")
-                    detect_btn = gr.Button("🔍 Re-detect Hardware", variant="primary")
-                    apply_btn = gr.Button("📝 Apply Recommended Config", variant="secondary")
-                    status_text = gr.Textbox(label="Status", interactive=False)
+                    with gr.Column(scale=1):
+                        gr.Markdown("### ⚡ Quick Actions")
+                        detect_btn = gr.Button("🔍 Re-detect Hardware", variant="primary")
+                        apply_btn = gr.Button("📝 Apply Recommended Config", variant="secondary")
+                        status_text = gr.Textbox(label="Status", interactive=False)
 
             detect_btn.click(
                 fn=self.detect_and_configure,
@@ -230,11 +235,13 @@ Training is running in the background. Check the logs for progress.
                 outputs=[status_text]
             )
 
+            gr.Markdown("---")
+
             # Training Control Section
             gr.Markdown("## 🎮 Training Control")
 
             with gr.Row():
-                with gr.Column():
+                with gr.Column(scale=1):
                     exp_name = gr.Textbox(
                         label="Experiment Name",
                         placeholder="e.g., mar10-baseline",
@@ -247,12 +254,14 @@ Training is running in the background. Check the logs for progress.
                         value=300,
                         step=60
                     )
-
+                    
+                    gr.Markdown("### Controls")
                     with gr.Row():
-                        start_btn = gr.Button("▶️ Start Training", variant="primary")
-                        stop_btn = gr.Button("⏹️ Stop Training", variant="stop")
+                        start_btn = gr.Button("▶️ Start", variant="primary", scale=1)
+                        stop_btn = gr.Button("⏹️ Stop", variant="stop", scale=1)
 
-                with gr.Column():
+                with gr.Column(scale=1):
+                    gr.Markdown("### Status")
                     status_display = gr.Markdown(self.get_training_status())
                     refresh_timer = gr.Timer(value=5)
 
@@ -261,59 +270,64 @@ Training is running in the background. Check the logs for progress.
                 fn=lambda: self.get_training_status(),
                 outputs=[status_display]
             )
-            
+
             start_btn.click(
                 fn=lambda name, time: self.start_training(name, time),
                 inputs=[exp_name, time_budget],
                 outputs=[status_display]
             )
-            
+
             stop_btn.click(
                 fn=lambda: self.stop_training(),
                 outputs=[status_display]
             )
-            
+
+            gr.Markdown("---")
+
             # Experiment History Section
             gr.Markdown("## 📊 Experiment History")
 
             with gr.Row():
-                with gr.Column():
+                with gr.Column(scale=1):
+                    gr.Markdown("### Statistics")
                     stats_md = gr.Markdown(self.get_experiment_stats())
-                with gr.Column():
+                    refresh_btn = gr.Button("🔄 Refresh", variant="secondary")
+
+                with gr.Column(scale=1):
+                    gr.Markdown("### Recent Experiments")
                     recent_md = gr.Markdown(self.get_recent_experiments_table())
 
-            refresh_btn = gr.Button("🔄 Refresh Statistics")
             refresh_btn.click(
                 fn=lambda: (self.get_experiment_stats(), self.get_recent_experiments_table()),
                 outputs=[stats_md, recent_md]
             )
-            
+
+            gr.Markdown("---")
+
             # Settings Section
             gr.Markdown("## ⚙️ Settings")
-            
+
             with gr.Accordion("Advanced Configuration", open=False):
                 gr.Markdown("""
-                ### Architecture Variants
-                - **MoE (Mixture of Experts):** Enable for high-end GPUs
-                - **GQA (Grouped Query Attention):** Reduces memory usage
-                - **SwiGLU:** Better activation function
-                
-                ### Optimizers
-                - **Muon+AdamW:** Default, best for most cases
-                - **Lion:** Memory efficient
-                - **Adafactor:** Adaptive LR
-                
-                ### Tips
-                - Higher depth = more capacity but slower
-                - Larger batch = more stable but more memory
-                - Enable checkpointing for long runs
+### Architecture Variants
+- **MoE (Mixture of Experts):** Enable for high-end GPUs
+- **GQA (Grouped Query Attention):** Reduces memory usage
+- **SwiGLU:** Better activation function
+
+### Optimizers
+- **Muon+AdamW:** Default, best for most cases
+- **Lion:** Memory efficient
+- **Adafactor:** Adaptive LR
+
+### Tips
+- Higher depth = more capacity but slower
+- Larger batch = more stable but more memory
+- Enable checkpointing for long runs
                 """)
-            
+
             # Footer
-            gr.Markdown("""
-            ---
-            **Autoresearch** - Autonomous AI Research System
-            """)
+            gr.Markdown("---")
+            gr.Markdown("**Autoresearch** - Autonomous AI Research System")
 
         # Launch
         demo.launch(share=share, server_name="0.0.0.0", theme=gr.themes.Base())
