@@ -6,6 +6,7 @@ Usage: uv run train.py [--depth 8] [--aspect-ratio 64] [--batch-size 64] ...
 
 from __future__ import annotations
 import os
+import sys
 import gc
 import time
 import math
@@ -48,10 +49,144 @@ def parse_args():
     parser.add_argument("--resume", action="store_true", help="Resume from latest checkpoint")
     parser.add_argument("--language", type=str, default="en", help="Language code (en, fr, es, de, hi, zh, ja, gu, nl, or)")
 
+    # Optuna hyperparameter search
+    parser.add_argument("--optuna", action="store_true", help="Run Optuna hyperparameter search instead of a single training run")
+    parser.add_argument("--trials", type=int, default=20, help="Number of Optuna trials (default: 20)")
+    parser.add_argument("--study-name", type=str, default="autoresearch_hpo", help="Optuna study name")
+    parser.add_argument("--optuna-resume", action="store_true", help="Resume an existing Optuna study from DB")
+    parser.add_argument("--best", action="store_true", help="Print best Optuna params from existing study and exit")
+
     return parser.parse_args()
 
 # Parse arguments
 args = parse_args()
+
+# ---------------------------------------------------------------------------
+# Optuna hyperparameter search (runs as subprocesses, exits early)
+# ---------------------------------------------------------------------------
+
+if args.optuna or args.best:
+    import subprocess
+    import json as _optuna_json
+    from pathlib import Path as _Path
+    from datetime import datetime as _dt
+
+    import optuna
+    from optuna.samplers import TPESampler
+    from optuna.pruners import MedianPruner
+
+    optuna.logging.set_verbosity(optuna.logging.WARNING)
+
+    _STORAGE = "sqlite:///optuna_study.db"
+    _LOG_PATH = "run.log"
+
+    def _suggest(trial):
+        return {
+            "depth":           trial.suggest_int("depth", 2, 10, step=2),
+            "aspect_ratio":    trial.suggest_categorical("aspect_ratio", [32, 48, 64, 96]),
+            "head_dim":        trial.suggest_categorical("head_dim", [64, 128]),
+            "optimizer_type":  trial.suggest_categorical("optimizer_type", ["muon_adamw", "lion", "adafactor"]),
+            "matrix_lr":       trial.suggest_float("matrix_lr", 0.005, 0.1, log=True),
+            "weight_decay":    trial.suggest_float("weight_decay", 0.05, 0.5, log=True),
+            "use_swiglu":      trial.suggest_categorical("use_swiglu", [True, False]),
+            "use_prenorm":     trial.suggest_categorical("use_prenorm", [True, False]),
+            "use_weight_tying": trial.suggest_categorical("use_weight_tying", [True, False]),
+        }
+
+    def _build_cmd(params, time_budget, language):
+        cmd = [
+            sys.executable, __file__,
+            "--language", language,
+            "--time-budget", str(time_budget),
+            "--depth", str(params["depth"]),
+            "--aspect-ratio", str(params["aspect_ratio"]),
+            "--head-dim", str(params["head_dim"]),
+            "--optimizer", params["optimizer_type"],
+        ]
+        if params.get("use_swiglu"):   cmd.append("--use-swiglu")
+        if params.get("use_prenorm"):  cmd.append("--use-prenorm")
+        return cmd
+
+    def _parse_bpb(log_path):
+        try:
+            with open(log_path) as f:
+                for line in f:
+                    if line.startswith("val_bpb:"):
+                        return float(line.split(":")[1].strip())
+        except Exception:
+            pass
+        return None
+
+    def _print_best(study):
+        try:
+            best = study.best_trial
+        except ValueError:
+            print("No completed trials yet.")
+            return
+        print(f"\n{'='*60}")
+        print(f"BEST TRIAL  #{best.number}  val_bpb={best.value:.6f}")
+        print(f"{'='*60}")
+        for k, v in best.params.items():
+            print(f"  {k}: {v}")
+        print(f"\n  Reproduce:")
+        print("  " + " ".join(_build_cmd(best.params, args.time_budget or 300, args.language)))
+        print(f"{'='*60}\n")
+
+    _sampler = TPESampler(seed=42, n_startup_trials=5)
+    _pruner  = MedianPruner(n_startup_trials=5)
+    _study = optuna.create_study(
+        study_name=args.study_name,
+        storage=_STORAGE,
+        direction="minimize",
+        sampler=_sampler,
+        pruner=_pruner,
+        load_if_exists=True,
+    )
+
+    if args.best:
+        _print_best(_study)
+        sys.exit(0)
+
+    _time_budget = args.time_budget or 300
+    _done_before = len([t for t in _study.trials if t.state == optuna.trial.TrialState.COMPLETE])
+    print(f"\nAutoresearch 2.0 — Optuna HPO")
+    print(f"Study:      {args.study_name}  ({_done_before} trials already done)")
+    print(f"Language:   {args.language}")
+    print(f"Time/trial: {_time_budget}s")
+    print(f"New trials: {args.trials}\n")
+
+    import time as _time
+
+    def _objective(trial):
+        params = _suggest(trial)
+        print(f"\nTrial #{trial.number}: {params}")
+        _Path(_LOG_PATH).write_text("")
+        cmd = _build_cmd(params, _time_budget, args.language)
+        t0 = _time.time()
+        with open(_LOG_PATH, "w") as lf:
+            subprocess.run(cmd, stdout=lf, stderr=subprocess.STDOUT)
+        elapsed = _time.time() - t0
+        bpb = _parse_bpb(_LOG_PATH)
+        if bpb is None:
+            raise optuna.exceptions.TrialPruned("Training crashed")
+        print(f"  → val_bpb={bpb:.6f}  ({elapsed:.0f}s)")
+        record = {"trial": trial.number, "val_bpb": bpb, "elapsed_s": round(elapsed),
+                  "timestamp": _dt.now().isoformat(), **params}
+        with open("optuna_trials.jsonl", "a") as f:
+            f.write(_optuna_json.dumps(record) + "\n")
+        return bpb
+
+    try:
+        _study.optimize(_objective, n_trials=args.trials, show_progress_bar=False)
+    except KeyboardInterrupt:
+        print("\nSearch interrupted.")
+
+    _print_best(_study)
+    _done = [t for t in _study.trials if t.state == optuna.trial.TrialState.COMPLETE]
+    _pruned = [t for t in _study.trials if t.state == optuna.trial.TrialState.PRUNED]
+    print(f"Completed: {len(_done)}  Pruned: {len(_pruned)}")
+    print(f"Results log: optuna_trials.jsonl  |  DB: optuna_study.db")
+    sys.exit(0)
 
 # Import configuration
 from config import ExperimentConfig, DEFAULT_CONFIG
