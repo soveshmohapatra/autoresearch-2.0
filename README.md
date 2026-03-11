@@ -96,7 +96,7 @@ Let Claude propose and test architecture changes overnight.
 
 **No API key required** — the agent automatically falls back to the local Claude Code CLI if `ANTHROPIC_API_KEY` is not set. Priority order:
 1. Anthropic API (if `ANTHROPIC_API_KEY` is set)
-2. `claude` CLI — Claude Code (if installed)
+2. `claude` CLI — Claude Code (if installed, detected via `shutil.which("claude")`)
 
 ```bash
 # Via GUI — pick option 3 "Run agent + Optuna together"
@@ -248,15 +248,20 @@ GRAD_CLIP         = 1.0
 autoresearch-2.0/
 ├── run.py              — Unified launcher (train / agent / optuna / all)
 ├── train.py            — Model + training loop (AGENT EDIT ZONE)
-├── agent.py            — Autonomous Claude API agent
+├── agent.py            — Autonomous Claude agent (API or Claude Code CLI)
 ├── optuna_search.py    — Bayesian hyperparameter search (Optuna TPE)
-├── gui.py              — Terminal dashboard
+├── gui.py              — Terminal dashboard (main entry point)
 ├── run_loop.py         — Experiment runner: git → train → record → keep/discard
 ├── prepare.py          — Data download, tokenizer, evaluation
 ├── config.py           — Hardware and experiment configuration
 ├── hardware.py         — Hardware detection
 ├── models.py           — Model catalog
-└── program.md          — Agent instructions
+├── program.md          — Agent instructions
+└── logs/
+    ├── agent.log       — Live agent output
+    ├── optuna.log      — Live Optuna output
+    ├── claude_debug.log — Raw claude CLI response (last call)
+    └── parse_fail.log  — Full response on parse failure (diagnosis)
 ```
 
 ---
