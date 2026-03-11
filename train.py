@@ -1183,7 +1183,7 @@ while True:
     muon_weight_decay = get_weight_decay(progress)
     for group in optimizer.param_groups:
         group["lr"] = group["initial_lr"] * lrm
-        if group['kind'] in ['muon', 'lion']:
+        if group.get('kind') in ['muon', 'lion']:
             group["momentum"] = muon_momentum
             group["weight_decay"] = muon_weight_decay
 

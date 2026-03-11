@@ -233,15 +233,15 @@ def parse_claude_response(response: str) -> tuple[str, str]:
     desc_match = re.search(r"DESCRIPTION:\s*(.+?)(?:\n|$)", response, re.IGNORECASE)
     description = desc_match.group(1).strip() if desc_match else f"auto_{datetime.now().strftime('%m%d_%H%M')}"
 
-    # Format: ```python\n# ===\n# AGENT EDIT ZONE\n...\n# ===\n# END AGENT EDIT ZONE\n```
+    # Format: ```python\n# ===\n# AGENT EDIT ZONE\n...\n# ===\n# END AGENT EDIT ZONE\n[# ===]\n```
     zone_match = re.search(
-        r"```python\s*(# =+\s*# AGENT EDIT ZONE\b.+?# =+\s*# END AGENT EDIT ZONE)\s*```",
+        r"```python\s*(# =+\s*# AGENT EDIT ZONE\b.+?# =+\s*# END AGENT EDIT ZONE\s*(?:# =+)?)\s*```",
         response, re.DOTALL | re.IGNORECASE
     )
     if not zone_match:
-        # Fallback: separator may be missing or in different position
+        # Fallback: separator placement varies
         zone_match = re.search(
-            r"```python\s*((?:# =+\s*)?# AGENT EDIT ZONE\b.+?(?:# =+\s*)?# END AGENT EDIT ZONE)\s*```",
+            r"```python\s*((?:# =+\s*)?# AGENT EDIT ZONE\b.+?# END AGENT EDIT ZONE\s*(?:# =+)?)\s*```",
             response, re.DOTALL | re.IGNORECASE
         )
 
