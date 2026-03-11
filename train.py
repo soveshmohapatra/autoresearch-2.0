@@ -931,11 +931,17 @@ class CheckpointManager:
         self.save_dir = Path(save_dir)
         self.save_interval = save_interval
         self.keep_last = keep_last
-        self.checkpoints = []
         self.last_save_time = time.time()
-        
+
         if self.enabled:
             self.save_dir.mkdir(parents=True, exist_ok=True)
+            # Scan existing checkpoints so pruning is aware of previous runs
+            self.checkpoints = sorted(
+                self.save_dir.glob("checkpoint_*.pt"),
+                key=lambda p: p.stat().st_mtime
+            )
+        else:
+            self.checkpoints = []
     
     def save(self, model, optimizer, step, val_bpb, config_snapshot, force=False):
         """Save checkpoint."""
@@ -962,14 +968,30 @@ class CheckpointManager:
         
         torch.save(checkpoint, filepath)
         self.checkpoints.append(filepath)
-        
-        # Remove old checkpoints
-        while len(self.checkpoints) > self.keep_last:
-            old_checkpoint = self.checkpoints.pop(0)
-            if old_checkpoint.exists():
-                old_checkpoint.unlink()
-        
+
+        # Keep only best (lowest bpb) + latest — delete everything else
+        self._prune()
+
         print(f"Saved checkpoint: {filename}")
+
+    def _bpb_from_path(self, p: Path) -> float:
+        """Extract val_bpb from checkpoint filename."""
+        try:
+            return float(p.stem.split("_bpb")[-1])
+        except Exception:
+            return float("inf")
+
+    def _prune(self):
+        """Delete all checkpoints except the best and the latest."""
+        if len(self.checkpoints) <= 2:
+            return
+        best = min(self.checkpoints, key=self._bpb_from_path)
+        latest = self.checkpoints[-1]
+        keep = {best, latest}
+        for ckpt in list(self.checkpoints):
+            if ckpt not in keep and ckpt.exists():
+                ckpt.unlink()
+                self.checkpoints.remove(ckpt)
     
     def load_latest(self, model, optimizer):
         """Load latest checkpoint. Returns checkpoint dict or None on failure."""

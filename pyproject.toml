@@ -17,6 +17,7 @@ dependencies = [
     "pytest>=8.0.0",
     "rich>=13.0.0",
     "anthropic>=0.40.0",
+    "optuna>=3.6.0",
 ]
 
 # CUDA-specific dependencies for Linux/Windows with NVIDIA GPUs
