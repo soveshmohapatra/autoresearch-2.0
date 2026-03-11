@@ -824,7 +824,7 @@ MOE_TOP_K     = 2           # experts activated per token (if USE_MOE)
 USE_GQA       = False       # Grouped Query Attention (fewer KV heads)
 GQA_KV_GROUPS = 4           # divide num_heads by this for KV heads (if USE_GQA)
 
-USE_SWIGLU    = True        # SwiGLU activation (replaces ReLU²)
+USE_SWIGLU    = False       # SwiGLU activation (replaces ReLU²)
 USE_GEGLU     = False       # GeGLU activation (replaces ReLU²; pick at most one gated)
 USE_PRENORM   = False       # Pre-norm residual stream (default: post-norm)
 USE_WEIGHT_TYING = True     # Tie lm_head weights to wte (reduces params, often helps)
