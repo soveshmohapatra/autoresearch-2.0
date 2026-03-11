@@ -50,7 +50,17 @@ uv sync
 uv run python gui.py
 ```
 
-The dashboard handles everything from there — pick a language, pick a model, set a time budget, and go.
+The dashboard handles everything from there:
+
+```
+What would you like to do?
+  1. View model catalog
+  2. Run an experiment
+  3. Run agent + Optuna together
+  4. View experiment history
+  5. Detect hardware
+  q. Quit
+```
 
 ---
 
@@ -82,10 +92,18 @@ The dashboard handles everything from there — pick a language, pick a model, s
 
 ## Autonomous Agent
 
-Let Claude propose and test architecture changes overnight:
+Let Claude propose and test architecture changes overnight.
+
+**No API key required** — the agent automatically falls back to the local Claude Code CLI if `ANTHROPIC_API_KEY` is not set. Priority order:
+1. Anthropic API (if `ANTHROPIC_API_KEY` is set)
+2. `claude` CLI — Claude Code (if installed)
 
 ```bash
-export ANTHROPIC_API_KEY=sk-ant-...
+# Via GUI — pick option 3 "Run agent + Optuna together"
+uv run python gui.py
+
+# Or via command line
+export ANTHROPIC_API_KEY=sk-ant-...          # optional if Claude Code is installed
 uv run python run.py agent                   # runs forever
 uv run python run.py agent --max-runs 20     # stop after 20 experiments
 uv run python run.py agent --dry-run         # propose changes without training
@@ -144,7 +162,13 @@ The search space covers:
 
 ## Run Everything at Once
 
-Launch the agent and Optuna in parallel with a single command:
+The easiest way — pick option **3** in the GUI:
+
+```bash
+uv run python gui.py   # → choose "3. Run agent + Optuna together"
+```
+
+Or from the command line:
 
 ```bash
 # Agent + Optuna together, forever
@@ -154,7 +178,7 @@ uv run python run.py all
 uv run python run.py all --agent-runs 20 --optuna-trials 30 --language hi --time-budget 120
 ```
 
-Both processes run in the background, writing to `logs/agent.log` and `logs/optuna.log`. Output is streamed live to the terminal. Press Ctrl+C to stop both cleanly.
+Both processes run in parallel. The GUI shows a live split-panel view (agent left, Optuna right). The CLI writes to `logs/agent.log` and `logs/optuna.log`. Press Ctrl+C to stop both cleanly.
 
 ---
 
