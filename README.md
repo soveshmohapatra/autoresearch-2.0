@@ -14,6 +14,8 @@ Train a real GPT-style language model from scratch — in your own language — 
 - Trains a GPT transformer from scratch on real Wikipedia data
 - Runs autonomous experiments: tweaks architecture or optimizer, trains 5 min, keeps improvements, discards regressions
 - Warm-starts every cycle from the previous best checkpoint — the model keeps getting better
+- Runs Optuna-powered hyperparameter search directly from `train.py` — no extra scripts
+- Keeps only the **best + latest checkpoint** per language — no disk bloat
 - Works in 10 languages out of the box
 - Runs anywhere: CUDA, Apple Silicon, CPU
 
@@ -40,7 +42,7 @@ Data downloads automatically the first time you pick a language. No setup needed
 curl -LsSf https://astral.sh/uv/install.sh | sh
 
 # 2. Clone and install
-git clone <this-repo> && cd autoresearch-2.0
+git clone https://github.com/soveshmohapatra/autoresearch-2.0 && cd autoresearch-2.0
 uv sync
 
 # 3. Launch
@@ -110,6 +112,45 @@ uv run python gui.py --history
 
 ---
 
+## Optuna Hyperparameter Search
+
+Bayesian HPO built directly into `train.py` — no separate script needed.
+
+```bash
+# Run 20 trials (default), 300s each
+uv run python train.py --optuna
+
+# Custom: 50 trials, 120s budget, Hindi
+uv run python train.py --optuna --trials 50 --time-budget 120 --language hi
+
+# Resume a previous study (results stored in optuna_study.db)
+uv run python train.py --optuna --optuna-resume
+
+# Print the best params found so far and exit
+uv run python train.py --best
+```
+
+Optuna uses the **TPE sampler** (Bayesian, learns from prior trials) with **MedianPruner** to kill bad trials early. Results are persisted in `optuna_study.db` so you can resume or inspect at any time.
+
+The search space covers:
+- `DEPTH`, `ASPECT_RATIO`, `HEAD_DIM`
+- `MATRIX_LR`, `WEIGHT_DECAY`
+- `USE_SWIGLU`, `USE_PRENORM`, `USE_WEIGHT_TYING`
+- `OPTIMIZER_TYPE`
+
+---
+
+## Checkpoints
+
+Each language keeps exactly **2 checkpoints**: the best `val_bpb` achieved so far, and the most recent. Older checkpoints are deleted automatically. Resuming a run always picks up from the best checkpoint.
+
+Checkpoint filenames encode the metric:
+```
+checkpoint_step12400_bpb1.8234.pt
+```
+
+---
+
 ## AGENT EDIT ZONE
 
 The only section of `train.py` the agent (or you) ever modifies. One change per experiment, one commit per change — the full history is always clean and reversible.
@@ -164,7 +205,7 @@ GRAD_CLIP         = 1.0
 ```
 autoresearch-2.0/
 ├── gui.py          — Terminal dashboard (main entry point)
-├── train.py        — Model + training loop (AGENT EDIT ZONE inside)
+├── train.py        — Model + training loop (AGENT EDIT ZONE + Optuna HPO inside)
 ├── prepare.py      — Data download, tokenizer, evaluation
 ├── agent.py        — Autonomous Claude API agent
 ├── run_loop.py     — Experiment runner: git → train → record → keep/discard
