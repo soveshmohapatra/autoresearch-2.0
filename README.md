@@ -1,266 +1,216 @@
 # Autoresearch 2.0
 
-![teaser](progress.png)
-
-> *One day, frontier AI research used to be done by meat computers in between eating, sleeping, having other fun, and synchronizing once in a while using sound wave interconnect in the ritual of "group meeting". That era is long gone. Research is now entirely the domain of autonomous swarms of AI agents running across compute cluster megastructures in the skies. The agents claim that we are now in the 10,205th generation of the code base, in any case no one could tell if that's right or wrong as the "code" is now a self-modifying binary that has grown beyond human comprehension. This repo is the story of how it all began.*  
+> *One day, frontier AI research used to be done by meat computers in between eating, sleeping, having other fun, and synchronizing once in a while using sound wave interconnect in the ritual of "group meeting". That era is long gone.*
 > **— @karpathy, March 2026**
 
----
-
-## 📜 Credits & Origin
-
-**Autoresearch 2.0** is an enhanced fork of the original [**autoresearch**](https://github.com/karpathy/autoresearch) project created by **[Andrej Karpathy](https://github.com/karpathy)**. All credit for the original concept, architecture, and implementation goes to Andrej Karpathy.
-
-This project builds upon Andrej's foundational work with the goal of making autonomous AI research more accessible, user-friendly, and powerful.
-
-### What Was the Original Autoresearch?
-
-The original autoresearch was a brilliant concept: give an AI agent a small but real LLM training setup and let it experiment autonomously. It modifies the code, trains for 5 minutes, checks if the result improved, keeps or discards, and repeats. You wake up in the morning to a log of experiments and (hopefully) a better model.
-
-The core idea is that you're not touching any of the Python files like you normally would as a researcher. Instead, you program the `program.md` Markdown files that provide context to the AI agents and set up your autonomous research org.
+Train a real GPT-style language model from scratch — in your own language — and let an AI agent run experiments on it autonomously while you sleep.
 
 ---
 
-## 🚀 What's New in Autoresearch 2.0?
+## What it does
 
-Autoresearch 2.0 introduces significant improvements and new features:
-
-### 1. **Multi-Platform Support** 🖥️
-- **NVIDIA GPUs (CUDA)** - Full support for RTX 3090/4090, A100, H100, etc.
-- **Apple Silicon (MPS)** - Native support for M1/M2/M3 Macs
-- **CPU Fallback** - Works on any system without GPU
-
-### 2. **Automatic Hardware Detection** 🔍
-- `hardware.py` automatically detects your GPU and recommends optimal configuration
-- Smart auto-tuning based on available VRAM/memory
-- Performance tier classification (HIGH-END vs STANDARD)
-
-### 3. **Beautiful GUI Dashboard** 🎨
-- **Gradio-based web interface** at `http://localhost:7860`
-- Real-time training monitoring and control
-- Hardware detection display
-- Experiment history and statistics
-- One-click configuration application
-
-### 4. **Multi-Agent Framework** 🤖
-A sophisticated team of specialized AI agents:
-- **ArchitectureAgent** - Model architecture modifications (depth, width, attention patterns)
-- **OptimizerAgent** - Optimizer selection and hyperparameter tuning
-- **HyperparameterAgent** - Learning rates, batch sizes, and training dynamics
-- **AnalystAgent** - Result analysis and decision making (keep/discard)
-
-### 5. **Experiment Memory & Knowledge Base** 🧠
-- Persistent storage of all experiment history
-- Pattern analysis across experiments
-- Hypothesis generation for next experiments
-- Success rate tracking by change type
-
-### 6. **Configuration System** ⚙️
-- Dataclass-based configuration (`config.py`)
-- Easy serialization and loading
-- Auto-detection with manual override support
-- Architecture variants support
-
-### 7. **Architecture Variants** 🏗️
-Enhanced model flexibility in `train.py`:
-- **MoE (Mixture of Experts)** - Sparse expert models for high-end GPUs
-- **GQA (Grouped Query Attention)** - Memory-efficient attention
-- **SwiGLU / GeGLU** - Advanced activation functions
-- **Pre-norm architecture** - Alternative normalization strategy
-
-### 8. **Optimizer Zoo** 🎯
-Multiple optimizer options:
-- **Muon + AdamW** - Default, best for most cases
-- **Lion** - Memory efficient
-- **Adafactor** - Adaptive learning rates
-
-### 9. **Experiment Tracking** 📊
-- **Weights & Biases integration** - Optional experiment logging
-- **Checkpointing** - Automatic model saving
-- **Metrics tracking** - Comprehensive experiment statistics
-
-### 10. **Testing Framework** ✅
-- Pytest-based test suite
-- Tests for configuration and agent systems
-- CI/CD ready
-
-### 11. **Quick Start Scripts** ⚡
-- `setup.sh` - One-command setup
-- `start.sh` - Launch GUI dashboard
-- `hardware.py` --detect-only - Quick hardware detection
+- Trains a GPT transformer from scratch on real Wikipedia data
+- Runs autonomous experiments: tweaks architecture or optimizer, trains 5 min, keeps improvements, discards regressions
+- Warm-starts every cycle from the previous best checkpoint — the model keeps getting better
+- Works in 10 languages out of the box
+- Runs anywhere: CUDA, Apple Silicon, CPU
 
 ---
 
-## 🏃 Quick Start (3 Steps!)
+## Languages
 
-### 1. Install & Setup
+| | Code | Language | | Code | Language |
+|---|------|----------|-|------|----------|
+| 🇺🇸 | `en` | English  | 🇯🇵 | `ja` | Japanese |
+| 🇫🇷 | `fr` | French   | 🇮🇳 | `gu` | Gujarati |
+| 🇪🇸 | `es` | Spanish  | 🇳🇱 | `nl` | Dutch    |
+| 🇩🇪 | `de` | German   | 🇮🇳 | `or` | Odia     |
+| 🇮🇳 | `hi` | Hindi    | 🇨🇳 | `zh` | Chinese  |
 
-```bash
-# Clone and enter the repo
-git clone https://github.com/soveshmohapatra/autoresearch-2.git
-cd autoresearch-2
-
-# Run the setup script (installs uv + dependencies)
-./setup.sh
-```
-
-### 2. Detect Your Hardware
-
-```bash
-# Auto-detects GPU and recommends optimal config
-uv run python hardware.py
-```
-
-**Automatically detects and optimizes for:**
-- 🟢 **NVIDIA GPUs** (CUDA) - RTX 3090/4090, A100, H100, etc.
-- 🍎 **Apple Silicon** (MPS) - M1/M2/M3, all variants
-- 💻 **CPU** - Fallback for any system
-
-### 3. Launch the GUI
-
-```bash
-# Beautiful web dashboard for monitoring & control
-./start.sh
-```
-
-The dashboard opens at **http://localhost:7860** with:
-- 🔍 Hardware detection & auto-configuration
-- 🎮 Training control (start/stop/monitor)
-- 📊 Experiment history & statistics
-- ⚙️ Settings for architecture variants
+Data downloads automatically the first time you pick a language. No setup needed.
 
 ---
 
-## 📦 Manual Quick Start
+## Quick Start
 
 ```bash
-# 1. Install uv (if you don't have it)
+# 1. Install uv (fast Python package manager)
 curl -LsSf https://astral.sh/uv/install.sh | sh
 
-# 2. Install dependencies
+# 2. Clone and install
+git clone <this-repo> && cd autoresearch-2.0
 uv sync
 
-# 3. Download data and train tokenizer (~2 min)
-uv run python prepare.py
-
-# 4. Train a model (~5 min)
-uv run python train.py
+# 3. Launch
+uv run python gui.py
 ```
 
-That's it! The system auto-configures for your hardware.
+The dashboard handles everything from there — pick a language, pick a model, set a time budget, and go.
 
 ---
 
-## 🤖 Running the Agent
-
-Simply spin up your Claude/Codex or whatever you want in this repo (and disable all permissions), then you can prompt something like:
+## Terminal Dashboard
 
 ```
-Hi have a look at program.md and let's kick off a new experiment! Let's do the setup first.
+┌─────────────────────────────────────────────┐
+│  Autoresearch 2.0  ·  Apple Silicon  ·  MPS │
+├─────────────────────────────────────────────┤
+│  Experiment   exp_0311_1423_3               │
+│  Model        Small-2.5M                   │
+│  Status       RUNNING                      │
+│  Elapsed      04:32                        │
+│  Progress     ████████████░░░░░  63.4%     │
+│  Train Loss   2.847291                     │
+│  Val BPB      1.923847                     │
+├─────────────────────────────────────────────┤
+│  Loss Curve                                 │
+│  █▇▆▅▄▄▃▃▃▂▂▂▂▂▁▁▁▁▁▁                     │
+│  Start: 9.2341 → Now: 2.8472  ▼6.3869      │
+└─────────────────────────────────────────────┘
 ```
 
-The `program.md` file is essentially a super lightweight "skill".
+- Live loss sparkline — see training progress at a glance
+- Auto-keep loop — experiments run continuously, no prompts
+- Ctrl+C to stop anytime
 
-With the multi-agent framework in 2.0, you can now also invoke specialized agents:
+---
+
+## Autonomous Agent
+
+Let Claude propose and test architecture changes overnight:
+
+```bash
+export ANTHROPIC_API_KEY=sk-ant-...
+uv run python agent.py           # runs forever
+uv run python agent.py --max-runs 20
+```
+
+The agent reads experiment history, proposes the next change, edits `train.py`, runs training, and records the result. ~12 experiments per hour. ~100 while you sleep.
+
+---
+
+## Manual Usage
+
+```bash
+# Prepare data for a language (automatic via GUI, but can run manually)
+uv run python prepare.py --language fr
+
+# Single training run
+uv run python train.py --language fr
+uv run python train.py --language fr --resume   # warm-start from checkpoint
+
+# Hardware info
+uv run python run_loop.py --detect
+
+# Experiment history
+uv run python gui.py --history
+```
+
+---
+
+## AGENT EDIT ZONE
+
+The only section of `train.py` the agent (or you) ever modifies. One change per experiment, one commit per change — the full history is always clean and reversible.
 
 ```python
-from agents import ArchitectureAgent, OptimizerAgent, HyperparameterAgent, AnalystAgent
+# --- Model architecture ---
+DEPTH         = 8           # transformer layers
+ASPECT_RATIO  = 64          # model_dim = depth × aspect_ratio
+HEAD_DIM      = 128         # attention head dimension
+WINDOW_PATTERN = "SSSL"     # L = full context, S = half context
 
-# Each agent specializes in different aspects of experimentation
-architecture_agent = ArchitectureAgent()
-optimizer_agent = OptimizerAgent()
-# ... etc
+# --- Architecture variants ---
+USE_MOE          = False    # Mixture of Experts
+USE_GQA          = False    # Grouped Query Attention
+USE_SWIGLU       = False    # SwiGLU activation
+USE_PRENORM      = False    # Pre-norm residual stream
+USE_WEIGHT_TYING = False    # Tie lm_head ↔ wte
+
+# --- Optimizer ---
+OPTIMIZER_TYPE = "muon_adamw"   # "muon_adamw" | "lion" | "adafactor"
+MATRIX_LR      = 0.04
+WEIGHT_DECAY   = 0.2
+
+# --- Training ---
+TIME_BUDGET       = 300     # seconds per experiment (wall clock)
+TOTAL_BATCH_SIZE  = 2**19   # ~524K tokens per step
+DEVICE_BATCH_SIZE = 128     # reduce if OOM
+GRAD_CLIP         = 1.0
 ```
+
+> **Apple Silicon:** `DEPTH ≤ 4`, `ASPECT_RATIO ≤ 32`, `DEVICE_BATCH_SIZE ≤ 4`, `MAX_SEQ_LEN ≤ 512` are auto-enforced.
 
 ---
 
-## 📁 Project Structure
+## Platform Support
+
+| Platform | compile | Flash Attn | Autocast | Rec. Batch |
+|----------|:-------:|:----------:|:--------:|:----------:|
+| CUDA H100 | ✅ | ✅ Hopper | bfloat16 | 128–256 |
+| CUDA A100 | ✅ | ✅ | bfloat16 | 64–128 |
+| CUDA RTX 4090 | ✅ | ✅ | bfloat16 | 32–64 |
+| Apple M-Max/Ultra | ✅* | ❌ | bfloat16 | 16–32 |
+| Apple M-Base | ✅* | ❌ | bfloat16 | 4 (auto-capped) |
+| CPU | ❌ | ❌ | float32 | 4 |
+
+*Requires PyTorch ≥ 2.3 and macOS ≥ 14.4
+
+---
+
+## Project Structure
 
 ```
 autoresearch-2.0/
-├── prepare.py          # Constants, data prep + runtime utilities (do not modify)
-├── train.py            # Model, optimizer, training loop (agent modifies this)
-├── program.md          # Agent instructions
-├── config.py           # Configuration system (NEW in 2.0)
-├── hardware.py         # Hardware detection (NEW in 2.0)
-├── gui.py              # GUI dashboard (NEW in 2.0)
-├── setup.sh            # Setup script (NEW in 2.0)
-├── start.sh            # Quick start script (NEW in 2.0)
-├── agents/             # Multi-agent framework (NEW in 2.0)
-│   ├── __init__.py
-│   ├── memory.py       # Experiment memory
-│   ├── architecture.py # Architecture agent
-│   ├── optimizer.py    # Optimizer agent
-│   ├── hyperparameter.py
-│   ├── analyst.py      # Analyst agent
-│   └── utils.py
-├── tests/              # Test suite (NEW in 2.0)
-│   ├── test_config.py
-│   └── test_agents.py
-└── pyproject.toml      # Dependencies
+├── gui.py          — Terminal dashboard (main entry point)
+├── train.py        — Model + training loop (AGENT EDIT ZONE inside)
+├── prepare.py      — Data download, tokenizer, evaluation
+├── agent.py        — Autonomous Claude API agent
+├── run_loop.py     — Experiment runner: git → train → record → keep/discard
+├── config.py       — Hardware and experiment configuration
+├── hardware.py     — Hardware detection
+├── models.py       — Model catalog
+├── program.md      — Agent instructions
+└── agents/
+    ├── memory.py   — Persistent experiment history
+    ├── analyst.py
+    ├── architecture.py
+    ├── optimizer.py
+    └── hyperparameter.py
 ```
 
 ---
 
-## 🎯 Design Choices
+## How the experiment loop works
 
-- **Single file to modify.** The agent only touches `train.py`. This keeps the scope manageable and diffs reviewable.
-- **Fixed time budget.** Training always runs for exactly 5 minutes, regardless of your specific platform. This means you can expect approx 12 experiments/hour and approx 100 experiments while you sleep.
-- **Self-contained.** No external dependencies beyond PyTorch and a few small packages. No distributed training, no complex configs. One GPU, one file, one metric.
-- **Multi-platform.** Unlike the original, 2.0 supports CUDA, MPS, and CPU out of the box.
-- **Agent memory.** Experiments are stored persistently, enabling learning from past results.
+```
+Read history → Propose change → Edit train.py → Commit
+     ↑                                              ↓
+     └──── Keep / Discard ←── Measure val_bpb ←── Train
+```
 
----
-
-## 🖥️ Platform Support
-
-Autoresearch 2.0 supports multiple platforms:
-
-| Platform | Device | Precision | Max Recommended Depth |
-|----------|--------|-----------|----------------------|
-| **NVIDIA H100/A100** | CUDA | bfloat16 | 12+ layers |
-| **RTX 4090/3090** | CUDA | bfloat16/float16 | 8-10 layers |
-| **RTX 4080/3080** | CUDA | float16 | 6-8 layers |
-| **M3/M2/M1 Max/Ultra** | MPS | float32 | 8 layers |
-| **M3/M2/M1 Pro** | MPS | float32 | 6 layers |
-| **M3/M2/M1 (base)** | MPS | float32 | 4 layers |
-| **CPU** | CPU | float32 | 4 layers |
-
-The system auto-detects your hardware and applies optimal configuration.
+1. Agent reads `experiment_memory.json` — what was tried, what improved
+2. Proposes one change (architecture, optimizer, hyperparameter)
+3. Edits the AGENT EDIT ZONE, commits it
+4. Trains for `TIME_BUDGET` seconds, warm-starting from last checkpoint
+5. If `val_bpb` improved → kept. If not → `git reset --hard`
+6. Repeat
 
 ---
 
-## 📊 Configuration Recommendations for Smaller Hardware
+## Design Principles
 
-If you're running on smaller computers (MacBooks, consumer GPUs), here are recommendations:
+**One file, one section.** The agent only touches the AGENT EDIT ZONE. Every experiment is one commit — readable history, instant rollback.
 
-1. **Use a simpler dataset** - Try [TinyStories](https://huggingface.co/datasets/karpathy/tinystories-gpt4-clean) for narrower scope
-2. **Decrease vocab_size** - From 8192 down to 4096, 2048, or even 256 (byte-level)
-3. **Lower MAX_SEQ_LEN** - In `prepare.py`, reduce to 256-512 depending on your hardware
-4. **Reduce DEPTH** - In `train.py`, lower from 8 to 4-6 layers
-5. **Use simpler window pattern** - Try "L" instead of "SSSL"
-6. **Lower TOTAL_BATCH_SIZE** - Keep powers of 2, e.g., 2^14 (~16K)
+**Fixed time budget.** Equal wall-clock time for every experiment. No cherry-picking runs. The metric is `val_bpb` (bits-per-byte) — lower is better, and it's vocab-size independent so experiments are comparable across architectures.
 
-The hardware detection system (`hardware.py`) automatically applies these optimizations for you!
+**Warm-start by default.** Each cycle resumes from the previous best checkpoint. The model improves run over run, not just within a run.
+
+**Simplicity wins.** Equal val_bpb with simpler code → keep. Complexity needs to earn its place.
 
 ---
 
-## 🔗 Repository
+## Credits
 
-**Source Code:** [github.com/soveshmohapatra/autoresearch-2](https://github.com/soveshmohapatra/autoresearch-2.git)
+Built on [karpathy/autoresearch](https://github.com/karpathy/autoresearch) by **Andrej Karpathy**. All credit for the original concept, architecture, and core training loop belongs to him.
 
----
-
-## 🙏 Acknowledgments
-
-- **Original Concept & Implementation:** [Andrej Karpathy](https://github.com/karpathy)
-- **Base Repository:** [karpathy/autoresearch](https://github.com/karpathy/autoresearch)
-- **Parent Project:** [karpathy/nanochat](https://github.com/karpathy/nanochat)
-
-Autoresearch 2.0 stands on the shoulders of giants. Thank you, Andrej, for inspiring this work!
-
----
-
-## 📄 License
-
-MIT
+**License:** MIT

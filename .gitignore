@@ -22,8 +22,11 @@ AGENTS.md
 # Experimental code/artifacts
 dev/
 
-# Results file
+# Runtime artifacts
 results.tsv
+run.log
+loss_curve.jsonl
+experiment_memory.json
 
 # Configuration files (auto-generated)
 auto_config.json

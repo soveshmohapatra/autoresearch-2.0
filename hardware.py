@@ -190,7 +190,7 @@ def detect_hardware() -> HardwareInfo:
             # M-series classification
             is_high_end = "Max" in gpu_name or "Ultra" in gpu_name
             
-            if total_memory >= 64:  # M1/M2/M3 Max or Ultra
+            if total_memory >= 64:  # M1/M2/M3 Max or Ultra (~10-27 TFLOPS)
                 return HardwareInfo(
                     device_type=DeviceType.MPS,
                     device_name=gpu_name,
@@ -199,10 +199,10 @@ def detect_hardware() -> HardwareInfo:
                     recommended_depth=8,
                     recommended_seq_len=2048,
                     recommended_dtype="float32",
-                    peak_flops=200e9,
+                    peak_flops=10e12,
                     is_high_end=is_high_end
                 )
-            elif total_memory >= 24:  # M1/M2/M3 Pro
+            elif total_memory >= 24:  # M1/M2/M3 Pro (~5-7 TFLOPS)
                 return HardwareInfo(
                     device_type=DeviceType.MPS,
                     device_name=gpu_name,
@@ -211,10 +211,10 @@ def detect_hardware() -> HardwareInfo:
                     recommended_depth=6,
                     recommended_seq_len=1024,
                     recommended_dtype="float32",
-                    peak_flops=150e9,
+                    peak_flops=6e12,
                     is_high_end=is_high_end
                 )
-            else:  # M1/M2/M3 base (8-16GB)
+            else:  # M1/M2/M3 base (8-16GB, ~2.6-3.6 TFLOPS)
                 return HardwareInfo(
                     device_type=DeviceType.MPS,
                     device_name=gpu_name,
@@ -223,7 +223,7 @@ def detect_hardware() -> HardwareInfo:
                     recommended_depth=4,
                     recommended_seq_len=512,
                     recommended_dtype="float32",
-                    peak_flops=100e9,
+                    peak_flops=3e12,
                     is_high_end=is_high_end
                 )
     

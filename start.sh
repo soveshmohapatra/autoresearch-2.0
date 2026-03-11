@@ -16,9 +16,7 @@ if [ ! -d "$HOME/.cache/autoresearch/data" ]; then
     uv run python prepare.py --num-shards 10
 fi
 
-echo "🚀 Launching GUI..."
-echo ""
-echo "Dashboard will open at: http://localhost:7860"
+echo "Launching terminal dashboard..."
 echo "Press Ctrl+C to stop"
 echo ""
 

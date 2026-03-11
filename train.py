@@ -29,7 +29,7 @@ def parse_args():
     # Model architecture
     parser.add_argument("--depth", type=int, default=None, help="Number of transformer layers")
     parser.add_argument("--aspect-ratio", type=int, default=None, help="Aspect ratio for model dim")
-    parser.add_argument("--head-dim", type=int, default=128, help="Attention head dimension")
+    parser.add_argument("--head-dim", type=int, default=None, help="Attention head dimension")
     parser.add_argument("--batch-size", type=int, default=None, help="Device batch size")
     parser.add_argument("--seq-len", type=int, default=None, help="Sequence length")
     parser.add_argument("--optimizer", type=str, default=None, help="Optimizer type")
@@ -45,7 +45,9 @@ def parse_args():
     # Training
     parser.add_argument("--time-budget", type=int, default=None, help="Training time budget in seconds")
     parser.add_argument("--lr", type=float, default=None, help="Learning rate")
-    
+    parser.add_argument("--resume", action="store_true", help="Resume from latest checkpoint")
+    parser.add_argument("--language", type=str, default="en", help="Language code (en, fr, es, de, hi, zh, ja, gu, nl, or)")
+
     return parser.parse_args()
 
 # Parse arguments
@@ -83,6 +85,23 @@ if args.use_swiglu:
     config.model.use_swiglu = True
 if args.use_prenorm:
     config.model.use_prenorm = True
+
+# Language-specific directory setup
+import json as _json
+_LANGUAGE = getattr(args, 'language', 'en')
+_lang_cache = os.path.join(os.path.expanduser("~"), ".cache", "autoresearch", _LANGUAGE)
+LANG_DATA_DIR = os.path.join(_lang_cache, "data")
+LANG_TOKENIZER_DIR = os.path.join(_lang_cache, "tokenizer")
+LANG_CHECKPOINT_DIR = os.path.join(_lang_cache, "checkpoints")
+_meta_path = os.path.join(_lang_cache, "meta.json")
+if os.path.exists(_meta_path):
+    with open(_meta_path) as _f:
+        LANG_VAL_FILENAME = _json.load(_f).get("val_filename")
+else:
+    LANG_VAL_FILENAME = None  # prepare.py will use its own default
+
+# Override checkpoint dir with language-specific path
+config.checkpoint.save_dir = LANG_CHECKPOINT_DIR
 
 # Platform-specific setup
 DEVICE = config.device.get_device()
@@ -126,14 +145,9 @@ if DEVICE == "cuda":
     except Exception as e:
         print(f"Flash Attention 3 not available: {e}")
 
-from prepare import MAX_SEQ_LEN, Tokenizer, make_dataloader, evaluate_bpb
+from prepare import MAX_SEQ_LEN, Tokenizer, make_dataloader, evaluate_bpb, get_token_bytes
 
-# Override MAX_SEQ_LEN for MPS
-if DEVICE == "mps":
-    MAX_SEQ_LEN = 512
-    print(f"Reduced MAX_SEQ_LEN to {MAX_SEQ_LEN} for MPS")
-
-TIME_BUDGET = config.training.time_budget
+# MAX_SEQ_LEN and TIME_BUDGET are set in the AGENT EDIT ZONE below.
 
 # ---------------------------------------------------------------------------
 # Architecture Configuration
@@ -159,6 +173,7 @@ class ArchConfig:
     use_swiglu: bool = False  # SwiGLU activation
     use_geglu: bool = False  # GeGLU activation
     use_prenorm: bool = False  # Pre-norm architecture
+    use_weight_tying: bool = False  # Tie lm_head weights to wte
     
     # Computed
     @property
@@ -177,13 +192,7 @@ class ArchConfig:
         return self.num_heads
 
 
-# Global architecture config
-ARCH_CONFIG = ArchConfig(
-    depth=config.model.depth,
-    aspect_ratio=config.model.aspect_ratio,
-    head_dim=config.model.head_dim,
-    window_pattern=config.model.window_pattern,
-)
+# ARCH_CONFIG built after AGENT EDIT ZONE — see below.
 
 # ---------------------------------------------------------------------------
 # GPT Model with Architecture Variants
@@ -243,26 +252,30 @@ class MoELayer(nn.Module):
     
     def forward(self, x):
         B, T, C = x.shape
-        
-        # Compute gating scores
-        gate_logits = self.gate(x)  # (B, T, num_experts)
-        gate_weights = F.softmax(gate_logits, dim=-1)
-        
-        # Select top-k experts
+        N = B * T
+        x_flat = x.reshape(N, C)
+
+        # Gating
+        gate_weights = F.softmax(self.gate(x_flat), dim=-1)  # (N, E)
         top_k_weights, top_k_indices = torch.topk(gate_weights, self.top_k, dim=-1)
         top_k_weights = top_k_weights / (top_k_weights.sum(dim=-1, keepdim=True) + 1e-9)
-        
-        # Route to experts
-        output = torch.zeros_like(x)
-        for k in range(self.top_k):
-            expert_indices = top_k_indices[..., k]  # (B, T)
-            weights = top_k_weights[..., k:k+1]  # (B, T, 1)
-            
-            # Apply expert k to all positions
-            expert_output = self.experts[k](x)
-            output = output + expert_output * weights
-        
-        return output
+
+        # Flatten: each of N tokens has top_k (token, expert, weight) assignments
+        token_ids = torch.arange(N, device=x_flat.device).unsqueeze(1).expand(-1, self.top_k).reshape(-1)
+        flat_expert_ids = top_k_indices.reshape(-1)   # (N*top_k,)
+        flat_weights = top_k_weights.reshape(-1)      # (N*top_k,)
+
+        # Dispatch: run each expert only on its assigned tokens  — O(N*top_k/E per expert)
+        output = torch.zeros_like(x_flat)
+        for expert_idx in range(self.num_experts):
+            sel = (flat_expert_ids == expert_idx).nonzero(as_tuple=True)[0]
+            if sel.numel() == 0:
+                continue
+            tok = token_ids[sel]                          # token indices → this expert
+            x_out = self.experts[expert_idx](x_flat[tok])  # (n_i, C)
+            output.index_add_(0, tok, x_out * flat_weights[sel].unsqueeze(-1))
+
+        return output.reshape(B, T, C)
 
 
 class CausalSelfAttention(nn.Module):
@@ -302,12 +315,26 @@ class CausalSelfAttention(nn.Module):
         if FA3_AVAILABLE:
             y = fa3.flash_attn_func(q, k, v, causal=True, window_size=window_size)
         else:
-            q = q.transpose(1, 2)
-            k = k.transpose(1, 2)
-            v = v.transpose(1, 2)
-            y = torch.nn.functional.scaled_dot_product_attention(
-                q, k, v, is_causal=True, dropout_p=0.0
-            )
+            q = q.transpose(1, 2)  # (B, n_head, T, head_dim)
+            k = k.transpose(1, 2)  # (B, n_kv_head, T, head_dim)
+            v = v.transpose(1, 2)  # (B, n_kv_head, T, head_dim)
+            # GQA: expand k/v to match q's head count
+            if self.n_kv_head != self.n_head:
+                groups = self.n_head // self.n_kv_head
+                k = k.repeat_interleave(groups, dim=1)
+                v = v.repeat_interleave(groups, dim=1)
+            # Sliding window mask for non-full-context layers
+            ws = window_size[0]
+            if ws < T:
+                # Causal + sliding window: each token only attends to last ws tokens
+                positions = torch.arange(T, device=q.device)
+                mask = (positions.unsqueeze(0) >= positions.unsqueeze(1) - ws + 1) & \
+                       (positions.unsqueeze(0) <= positions.unsqueeze(1))
+                attn_bias = torch.zeros(T, T, dtype=q.dtype, device=q.device)
+                attn_bias.masked_fill_(~mask, float('-inf'))
+                y = F.scaled_dot_product_attention(q, k, v, attn_mask=attn_bias, dropout_p=0.0)
+            else:
+                y = F.scaled_dot_product_attention(q, k, v, is_causal=True, dropout_p=0.0)
             y = y.transpose(1, 2)
         
         y = y.contiguous().view(B, T, -1)
@@ -319,23 +346,24 @@ class MLP(nn.Module):
     """MLP with activation variant support."""
     def __init__(self, config):
         super().__init__()
-        self.c_fc = nn.Linear(config.n_embd, 4 * config.n_embd, bias=False)
-        self.c_proj = nn.Linear(4 * config.n_embd, config.n_embd, bias=False)
         self.use_swiglu = ARCH_CONFIG.use_swiglu
         self.use_geglu = ARCH_CONFIG.use_geglu
+        # For gated activations (SwiGLU/GeGLU), c_fc outputs 4*n_embd which is
+        # split into gate (2*n_embd) + value (2*n_embd), so c_proj takes 2*n_embd.
+        # For standard activations, c_proj takes the full 4*n_embd.
+        self.c_fc = nn.Linear(config.n_embd, 4 * config.n_embd, bias=False)
+        proj_in = 2 * config.n_embd if (self.use_swiglu or self.use_geglu) else 4 * config.n_embd
+        self.c_proj = nn.Linear(proj_in, config.n_embd, bias=False)
 
     def forward(self, x):
         x = self.c_fc(x)
         if self.use_swiglu:
-            # SwiGLU: silu(gate) * value
             gate, value = x.chunk(2, dim=-1)
             x = F.silu(gate) * value
         elif self.use_geglu:
-            # GeGLU: gelu(gate) * value
             gate, value = x.chunk(2, dim=-1)
             x = F.gelu(gate) * value
         else:
-            # Default: ReLU²
             x = F.relu(x).square()
         x = self.c_proj(x)
         return x
@@ -421,6 +449,9 @@ class GPT(nn.Module):
         self.transformer.wte.to(dtype=DTYPE)
         for ve in self.value_embeds.values():
             ve.to(dtype=DTYPE)
+        # Weight tying: share lm_head and wte weights
+        if ARCH_CONFIG.use_weight_tying:
+            self.lm_head.weight = self.transformer.wte.weight
 
     def _precompute_rotary_embeddings(self, seq_len, head_dim, base=10000, device=None):
         if device is None:
@@ -568,7 +599,7 @@ def adamw_step_fused(p, grad, exp_avg, exp_avg_sq, step_t, lr_t, beta1_t, beta2_
     step_size = lr_t / bias1
     p.add_(exp_avg / denom, alpha=-step_size)
 
-@torch.compile(dynamic=False, fullgraph=False)
+@torch.compile(dynamic=False, fullgraph=True)
 def muon_step_fused(stacked_grads, stacked_params, momentum_buffer, second_momentum_buffer,
                     momentum_t, lr_t, wd_t, beta2_t, ns_steps, red_dim):
     momentum = momentum_t.to(stacked_grads.dtype)
@@ -765,40 +796,84 @@ class Adafactor(torch.optim.Optimizer):
                 
                 p.add_(update, alpha=-alpha)
 
-# ---------------------------------------------------------------------------
-# Hyperparameters (from config)
-# ---------------------------------------------------------------------------
+# ===========================================================================
+# AGENT EDIT ZONE
+# This is the only section you need to modify to run experiments.
+# Edit these constants directly — changes take effect immediately on next run.
+# ===========================================================================
 
-DEPTH = config.model.depth
-ASPECT_RATIO = config.model.aspect_ratio
-HEAD_DIM = config.model.head_dim
-WINDOW_PATTERN = config.model.window_pattern
-TOTAL_BATCH_SIZE = config.training.total_batch_size
-EMBEDDING_LR = config.optimizer.embedding_lr
-UNEMBEDDING_LR = config.optimizer.unembedding_lr
-MATRIX_LR = config.optimizer.matrix_lr
-SCALAR_LR = config.optimizer.scalar_lr
-WEIGHT_DECAY = config.optimizer.weight_decay
-ADAM_BETAS = config.optimizer.adam_betas
-WARMUP_RATIO = config.optimizer.warmup_ratio
-WARMDOWN_RATIO = config.optimizer.warmdown_ratio
-FINAL_LR_FRAC = config.optimizer.final_lr_frac
-DEVICE_BATCH_SIZE = config.training.device_batch_size
+# --- Model architecture ---
+DEPTH         = 8           # number of transformer layers
+ASPECT_RATIO  = 64          # model_dim = depth * aspect_ratio (must give model_dim % head_dim == 0)
+HEAD_DIM      = 128         # attention head dimension (keep at 128)
+WINDOW_PATTERN = "SSSL"     # attention pattern: L=full context, S=half context
 
-# Architecture variant flags (can be modified by agent)
-USE_MOE = False
-USE_GQA = False
-USE_SWIGLU = False
-USE_GEGLU = False
-USE_PRENORM = False
-OPTIMIZER_TYPE = "muon_adamw"  # "muon_adamw", "lion", "adafactor"
+# --- Architecture variants (True/False to toggle) ---
+USE_MOE       = False       # Mixture of Experts (sparse FFN)
+MOE_NUM_EXPERTS = 4         # total experts (if USE_MOE)
+MOE_TOP_K     = 2           # experts activated per token (if USE_MOE)
 
-# Update ARCH_CONFIG
-ARCH_CONFIG.use_moe = USE_MOE
-ARCH_CONFIG.use_gqa = USE_GQA
-ARCH_CONFIG.use_swiglu = USE_SWIGLU
-ARCH_CONFIG.use_geglu = USE_GEGLU
-ARCH_CONFIG.use_prenorm = USE_PRENORM
+USE_GQA       = False       # Grouped Query Attention (fewer KV heads)
+GQA_KV_GROUPS = 4           # divide num_heads by this for KV heads (if USE_GQA)
+
+USE_SWIGLU    = False       # SwiGLU activation (replaces ReLU²)
+USE_GEGLU     = False       # GeGLU activation (replaces ReLU²; pick at most one gated)
+USE_PRENORM   = False       # Pre-norm residual stream (default: post-norm)
+USE_WEIGHT_TYING = False    # Tie lm_head weights to wte (reduces params, often helps)
+
+# --- Optimizer ---
+OPTIMIZER_TYPE    = "muon_adamw"   # "muon_adamw" | "lion" | "adafactor"
+EMBEDDING_LR      = 0.6
+UNEMBEDDING_LR    = 0.004
+MATRIX_LR         = 0.04
+SCALAR_LR         = 0.5
+WEIGHT_DECAY      = 0.2
+ADAM_BETAS        = (0.8, 0.95)
+WARMUP_RATIO      = 0.0            # fraction of budget for LR warmup
+WARMDOWN_RATIO    = 0.5            # fraction of budget for LR cooldown
+FINAL_LR_FRAC     = 0.0            # final LR as fraction of peak
+
+# --- Training ---
+TIME_BUDGET       = 300            # seconds of training (wall clock, excl. startup)
+TOTAL_BATCH_SIZE  = 2**19          # ~524K tokens per optimizer step
+DEVICE_BATCH_SIZE = 128            # per-device batch size (reduce if OOM)
+MAX_SEQ_LEN       = MAX_SEQ_LEN    # inherits from prepare.py (2048); override here if needed
+GRAD_CLIP         = 1.0            # gradient clipping norm (0.0 = disabled)
+
+# ===========================================================================
+# END AGENT EDIT ZONE
+# ===========================================================================
+
+# CLI overrides — only apply when the flag is explicitly passed (used by gui.py / run_loop.py)
+if args.depth is not None:        DEPTH = args.depth
+if args.aspect_ratio is not None: ASPECT_RATIO = args.aspect_ratio
+if args.head_dim is not None:     HEAD_DIM = args.head_dim
+if args.batch_size is not None:   DEVICE_BATCH_SIZE = args.batch_size
+if args.seq_len is not None:      MAX_SEQ_LEN = args.seq_len
+if args.optimizer is not None:    OPTIMIZER_TYPE = args.optimizer
+if args.time_budget is not None:  TIME_BUDGET = args.time_budget
+if args.use_moe:                  USE_MOE = True; MOE_NUM_EXPERTS = args.moe_experts
+if args.use_gqa:                  USE_GQA = True
+if args.use_swiglu:               USE_SWIGLU = True
+if args.use_prenorm:              USE_PRENORM = True
+
+# MPS caps — hardware memory limits on Apple Silicon
+if DEVICE == "mps":
+    DEPTH             = min(DEPTH, 4)
+    ASPECT_RATIO      = min(ASPECT_RATIO, 32)
+    DEVICE_BATCH_SIZE = min(DEVICE_BATCH_SIZE, 4)
+    TOTAL_BATCH_SIZE  = min(TOTAL_BATCH_SIZE, 2**14)
+    MAX_SEQ_LEN       = min(MAX_SEQ_LEN, 512)
+    print(f"MPS: capped to depth={DEPTH}, aspect={ASPECT_RATIO}, batch={DEVICE_BATCH_SIZE}, seqlen={MAX_SEQ_LEN}")
+
+# Build ARCH_CONFIG from resolved constants
+ARCH_CONFIG = ArchConfig(
+    depth=DEPTH, aspect_ratio=ASPECT_RATIO, head_dim=HEAD_DIM, window_pattern=WINDOW_PATTERN,
+    use_moe=USE_MOE, moe_num_experts=MOE_NUM_EXPERTS, moe_top_k=MOE_TOP_K,
+    use_gqa=USE_GQA, gqa_kv_groups=GQA_KV_GROUPS,
+    use_swiglu=USE_SWIGLU, use_geglu=USE_GEGLU, use_prenorm=USE_PRENORM,
+    use_weight_tying=USE_WEIGHT_TYING,
+)
 
 # ---------------------------------------------------------------------------
 # W&B Tracking & Checkpointing
@@ -862,13 +937,13 @@ class CheckpointManager:
         if self.enabled:
             self.save_dir.mkdir(parents=True, exist_ok=True)
     
-    def save(self, model, optimizer, step, val_bpb, config_snapshot):
+    def save(self, model, optimizer, step, val_bpb, config_snapshot, force=False):
         """Save checkpoint."""
         if not self.enabled:
             return
-        
+
         current_time = time.time()
-        if current_time - self.last_save_time < self.save_interval:
+        if not force and current_time - self.last_save_time < self.save_interval:
             return
         
         self.last_save_time = current_time
@@ -897,22 +972,25 @@ class CheckpointManager:
         print(f"Saved checkpoint: {filename}")
     
     def load_latest(self, model, optimizer):
-        """Load latest checkpoint."""
+        """Load latest checkpoint. Returns checkpoint dict or None on failure."""
         if not self.enabled or not self.save_dir.exists():
             return None
-        
+
         checkpoints = list(self.save_dir.glob("checkpoint_*.pt"))
         if not checkpoints:
+            print("Resume: no checkpoint found, starting from scratch.")
             return None
-        
+
         latest = max(checkpoints, key=lambda p: p.stat().st_mtime)
-        checkpoint = torch.load(latest, map_location=DEVICE)
-        
-        model.load_state_dict(checkpoint['model_state_dict'])
-        optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
-        
-        print(f"Loaded checkpoint: {latest.name}")
-        return checkpoint
+        try:
+            checkpoint = torch.load(latest, map_location=DEVICE)
+            model.load_state_dict(checkpoint['model_state_dict'])
+            optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+            print(f"Resumed from checkpoint: {latest.name} (step {checkpoint.get('step', '?')}, bpb {checkpoint.get('val_bpb', '?')})")
+            return checkpoint
+        except Exception as e:
+            print(f"Resume: failed to load {latest.name} ({e}), starting from scratch.")
+            return None
 
 
 # Initialize tracking and checkpointing
@@ -940,9 +1018,14 @@ if DEVICE == "cuda":
     torch.cuda.manual_seed(42)
 torch.set_float32_matmul_precision("high")
 
-autocast_ctx = torch.amp.autocast(device_type=DEVICE, dtype=DTYPE) if DEVICE == "cuda" else torch.autocast(device_type="cpu", dtype=torch.float32, enabled=False)
+if DEVICE == "cuda":
+    autocast_ctx = torch.amp.autocast(device_type="cuda", dtype=DTYPE)
+elif DEVICE == "mps":
+    autocast_ctx = torch.autocast(device_type="mps", dtype=torch.bfloat16)
+else:
+    autocast_ctx = torch.autocast(device_type="cpu", dtype=torch.float32, enabled=False)
 
-tokenizer = Tokenizer.from_directory()
+tokenizer = Tokenizer.from_directory(LANG_TOKENIZER_DIR)
 vocab_size = tokenizer.get_vocab_size()
 print(f"Vocab size: {vocab_size:,}")
 
@@ -950,7 +1033,7 @@ def build_model_config(depth):
     base_dim = depth * ASPECT_RATIO
     model_dim = ((base_dim + HEAD_DIM - 1) // HEAD_DIM) * HEAD_DIM
     num_heads = model_dim // HEAD_DIM
-    num_kv_heads = num_heads // ARCH_CONFIG.gqa_kv_groups if ARCH_CONFIG.use_gqa else num_heads
+    num_kv_heads = max(1, num_heads // ARCH_CONFIG.gqa_kv_groups) if ARCH_CONFIG.use_gqa else num_heads
     return GPTConfig(
         sequence_len=MAX_SEQ_LEN, vocab_size=vocab_size,
         n_layer=depth, n_head=num_heads, n_kv_head=num_kv_heads, n_embd=model_dim,
@@ -989,13 +1072,28 @@ optimizer = model.setup_optimizer(
     optimizer_type=OPTIMIZER_TYPE,
 )
 
+if args.resume:
+    checkpoint_mgr.load_latest(model, optimizer)
+
 if DEVICE == "cuda":
     model = torch.compile(model, dynamic=False)
-    print("Model compiled with torch.compile")
-else:
-    print("Skipping torch.compile for MPS/CPU")
+    print("Model compiled with torch.compile (CUDA)")
+elif DEVICE == "mps":
+    # torch.compile works on MPS with PyTorch 2.3+ / macOS 14.4+
+    _mac_ver = tuple(int(x) for x in __import__("platform").mac_ver()[0].split(".")[:2])
+    if torch.__version__ >= "2.3" and _mac_ver >= (14, 4):
+        try:
+            model = torch.compile(model, dynamic=False)
+            print("Model compiled with torch.compile (MPS)")
+        except Exception as e:
+            print(f"torch.compile on MPS failed ({e}), running eager")
+    else:
+        print("Skipping torch.compile on MPS (needs PyTorch>=2.3 + macOS>=14.4)")
+elif DEVICE == "cpu":
+    torch.set_num_threads(os.cpu_count() or 1)
+    print(f"CPU threads: {os.cpu_count()}")
 
-train_loader = make_dataloader(tokenizer, DEVICE_BATCH_SIZE, MAX_SEQ_LEN, "train", device=DEVICE)
+train_loader = make_dataloader(tokenizer, DEVICE_BATCH_SIZE, MAX_SEQ_LEN, "train", device=DEVICE, data_dir=LANG_DATA_DIR, val_filename=LANG_VAL_FILENAME)
 x, y, epoch = next(train_loader)
 
 print(f"Time budget: {TIME_BUDGET}s")
@@ -1026,6 +1124,15 @@ smooth_train_loss = 0
 total_training_time = 0
 step = 0
 best_val_bpb = float('inf')
+last_periodic_eval = 0.0  # wall time of last mid-training eval
+# Periodic eval fires every 20% of budget, but only when budget is long enough
+# (eval takes ~100s on MPS, so skip for budgets under 5min)
+PERIODIC_EVAL_INTERVAL = TIME_BUDGET / 5
+PERIODIC_EVAL_ENABLED = TIME_BUDGET >= 300
+
+# Loss curve side-channel for live terminal display
+LOSS_CURVE_FILE = Path("loss_curve.jsonl")
+LOSS_CURVE_FILE.write_text("")  # clear from previous run
 
 print("\nStarting training...")
 
@@ -1037,11 +1144,8 @@ while True:
     t0 = time.time()
     
     for micro_step in range(grad_accum_steps):
-        if DEVICE == "mps":
+        with autocast_ctx:
             loss = model(x, y)
-        else:
-            with autocast_ctx:
-                loss = model(x, y)
         train_loss = loss.detach()
         loss = loss / grad_accum_steps
         loss.backward()
@@ -1057,6 +1161,14 @@ while True:
         if group['kind'] in ['muon', 'lion']:
             group["momentum"] = muon_momentum
             group["weight_decay"] = muon_weight_decay
+
+    # Gradient clipping (before optimizer step)
+    grad_norm = 0.0
+    if GRAD_CLIP > 0.0:
+        grad_norm = nn.utils.clip_grad_norm_(model.parameters(), GRAD_CLIP).item()
+    else:
+        grad_norm = sum(p.grad.norm().item() ** 2 for p in model.parameters() if p.grad is not None) ** 0.5
+
     optimizer.step()
     model.zero_grad(set_to_none=True)
 
@@ -1086,23 +1198,47 @@ while True:
     mfu = 100 * num_flops_per_token * TOTAL_BATCH_SIZE / dt / PEAK_FLOPS
     remaining = max(0, TIME_BUDGET - total_training_time)
 
-    print(f"\rstep {step:05d} ({pct_done:.1f}%) | loss: {debiased_smooth_loss:.6f} | lrm: {lrm:.2f} | dt: {dt*1000:.0f}ms | tok/sec: {tok_per_sec:,} | mfu: {mfu:.1f}% | epoch: {epoch} | remaining: {remaining:.0f}s    ", end="", flush=True)
+    print(f"\rstep {step:05d} ({pct_done:.1f}%) | loss: {debiased_smooth_loss:.6f} | gnorm: {grad_norm:.2f} | lrm: {lrm:.2f} | dt: {dt*1000:.0f}ms | tok/sec: {tok_per_sec:,} | mfu: {mfu:.1f}% | epoch: {epoch} | remaining: {remaining:.0f}s    ", end="", flush=True)
+
+    # Write to loss curve side-channel every 10 steps
+    if step % 10 == 0:
+        with open(LOSS_CURVE_FILE, "a") as _lf:
+            _lf.write(json.dumps({"step": step, "loss": round(debiased_smooth_loss, 6), "progress": round(progress, 4), "remaining": round(remaining, 1)}) + "\n")
 
     # W&B logging
     if step % 10 == 0:
         wandb.log({
             "train_loss": debiased_smooth_loss,
+            "grad_norm": grad_norm,
             "lr_multiplier": lrm,
             "tokens_per_sec": tok_per_sec,
             "mfu_percent": mfu,
             "step": step,
         }, step=step)
 
+    # Periodic mid-training eval (every ~20% of time budget, only for long runs)
+    if (PERIODIC_EVAL_ENABLED and step > 10
+            and total_training_time - last_periodic_eval >= PERIODIC_EVAL_INTERVAL
+            and total_training_time < TIME_BUDGET * 0.9):
+        print()
+        print(f"[periodic eval @ {total_training_time:.0f}s / {TIME_BUDGET}s]")
+        model.eval()
+        with torch.no_grad():
+            mid_bpb = evaluate_bpb(model, tokenizer, DEVICE_BATCH_SIZE, device=DEVICE, seq_len=MAX_SEQ_LEN, data_dir=LANG_DATA_DIR, val_filename=LANG_VAL_FILENAME)
+        model.train()
+        print(f"  mid val_bpb: {mid_bpb:.6f}  (best so far: {min(best_val_bpb, mid_bpb):.6f})")
+        if mid_bpb < best_val_bpb:
+            best_val_bpb = mid_bpb
+        wandb.log({"mid_val_bpb": mid_bpb}, step=step)
+        last_periodic_eval = total_training_time
+
     # Checkpointing
     checkpoint_mgr.save(model, optimizer, step, best_val_bpb, config.to_dict())
 
-    # GC management
+    # GC management (freeze on first step to avoid ~500ms GC stalls)
     if step == 0:
+        gc.collect()
+        gc.freeze()
         gc.disable()
     elif (step + 1) % config.training.gc_interval == 0:
         gc.collect()
@@ -1116,11 +1252,12 @@ print()
 
 total_tokens = step * TOTAL_BATCH_SIZE
 
-# Final eval
-print("Running final evaluation...")
+# Final eval — cap steps for short time budgets to avoid hanging
+_eval_max_steps = None if TIME_BUDGET >= 300 else 100
+print(f"Running final evaluation{f' (capped at {_eval_max_steps} steps)' if _eval_max_steps else ''}...")
 model.eval()
 with torch.no_grad():
-    val_bpb = evaluate_bpb(model, tokenizer, DEVICE_BATCH_SIZE, device=DEVICE)
+    val_bpb = evaluate_bpb(model, tokenizer, DEVICE_BATCH_SIZE, device=DEVICE, seq_len=MAX_SEQ_LEN, max_steps=_eval_max_steps, data_dir=LANG_DATA_DIR, val_filename=LANG_VAL_FILENAME)
 
 # Log final results
 wandb.log({
@@ -1128,11 +1265,10 @@ wandb.log({
     "best_val_bpb": min(best_val_bpb, val_bpb),
 }, step=step)
 
-# Update best
+# Update best and always force-save so the next cycle can warm-start
 if val_bpb < best_val_bpb:
     best_val_bpb = val_bpb
-    # Save best model
-    checkpoint_mgr.save(model, optimizer, step, val_bpb, config.to_dict())
+checkpoint_mgr.save(model, optimizer, step, best_val_bpb, config.to_dict(), force=True)
 
 # Final summary
 t_end = time.time()

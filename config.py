@@ -50,7 +50,7 @@ class DeviceConfig:
         if device == "cuda":
             return 989.5e12
         elif device == "mps":
-            return 200e9
+            return 3e12  # M-series base; hardware.py uses accurate per-chip values
         else:
             return 50e9
 
@@ -62,7 +62,17 @@ class ModelConfig:
     aspect_ratio: int = 64
     head_dim: int = 128
     window_pattern: str = "SSSL"
-    
+
+    # Architecture variants
+    use_moe: bool = False
+    moe_num_experts: int = 4
+    moe_top_k: int = 2
+    use_gqa: bool = False
+    gqa_kv_groups: int = 4
+    use_swiglu: bool = False
+    use_geglu: bool = False
+    use_prenorm: bool = False
+
     @property
     def model_dim(self) -> int:
         base_dim = self.depth * self.aspect_ratio
@@ -87,6 +97,7 @@ class ModelConfig:
 @dataclass
 class OptimizerConfig:
     """Optimizer configuration."""
+    optimizer_type: str = "muon_adamw"  # "muon_adamw", "lion", "adafactor"
     embedding_lr: float = 0.6
     unembedding_lr: float = 0.004
     matrix_lr: float = 0.04

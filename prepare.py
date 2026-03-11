@@ -51,17 +51,81 @@ SPECIAL_TOKENS = [f"<|reserved_{i}|>" for i in range(4)]
 BOS_TOKEN = "<|reserved_0|>"
 
 # ---------------------------------------------------------------------------
+# Language configuration
+# ---------------------------------------------------------------------------
+
+LANGUAGE_CONFIGS = {
+    "en": {
+        "name": "English",
+        "type": "climbmix",
+        "note": "karpathy/climbmix-400b — 400B tokens of web text",
+    },
+    "fr": {"name": "French",    "type": "wikipedia", "wiki_code": "fr"},
+    "es": {"name": "Spanish",   "type": "wikipedia", "wiki_code": "es"},
+    "de": {"name": "German",    "type": "wikipedia", "wiki_code": "de"},
+    "hi": {"name": "Hindi",     "type": "wikipedia", "wiki_code": "hi"},
+    "zh": {"name": "Chinese",   "type": "wikipedia", "wiki_code": "zh"},
+    "ja": {"name": "Japanese",  "type": "wikipedia", "wiki_code": "ja"},
+    "gu": {"name": "Gujarati",  "type": "wikipedia", "wiki_code": "gu"},
+    "nl": {"name": "Dutch",     "type": "wikipedia", "wiki_code": "nl"},
+    "or": {"name": "Odia",      "type": "wikipedia", "wiki_code": "or"},
+}
+
+
+def get_lang_dirs(lang="en"):
+    """Return (data_dir, tokenizer_dir) for a given language."""
+    base = os.path.join(CACHE_DIR, lang)
+    return os.path.join(base, "data"), os.path.join(base, "tokenizer")
+
+
+def get_lang_checkpoint_dir(lang="en"):
+    return os.path.join(CACHE_DIR, lang, "checkpoints")
+
+
+def save_lang_meta(lang, val_filename, num_shards):
+    """Save language metadata so train.py can read val_filename."""
+    meta_path = os.path.join(CACHE_DIR, lang, "meta.json")
+    os.makedirs(os.path.dirname(meta_path), exist_ok=True)
+    with open(meta_path, "w") as f:
+        import json
+        json.dump({"val_filename": val_filename, "num_shards": num_shards}, f)
+
+
+def load_lang_meta(lang):
+    """Load language metadata. Returns dict or None."""
+    meta_path = os.path.join(CACHE_DIR, lang, "meta.json")
+    if not os.path.exists(meta_path):
+        return None
+    with open(meta_path) as f:
+        import json
+        return json.load(f)
+
+
+def get_wikipedia_shard_list(lang_code):
+    """Fetch list of (filename, url) tuples from HuggingFace API for a Wikipedia language."""
+    api_url = f"https://huggingface.co/api/datasets/wikimedia/wikipedia/parquet/20231101.{lang_code}/train"
+    response = requests.get(api_url, timeout=30)
+    response.raise_for_status()
+    files = response.json()
+    result = []
+    for e in files:
+        if isinstance(e, str):
+            result.append((e.split("/")[-1].split("?")[0], e))
+        else:
+            result.append((e["filename"], e["url"]))
+    return result
+
+# ---------------------------------------------------------------------------
 # Data download
 # ---------------------------------------------------------------------------
 
-def download_single_shard(index):
-    """Download one parquet shard with retries. Returns True on success."""
-    filename = f"shard_{index:05d}.parquet"
-    filepath = os.path.join(DATA_DIR, filename)
+def download_single_shard(args):
+    """Download one parquet shard. args = (filename, url, data_dir)."""
+    filename, url, data_dir = args
+    filepath = os.path.join(data_dir, filename)
     if os.path.exists(filepath):
         return True
 
-    url = f"{BASE_URL}/{filename}"
     max_attempts = 5
     for attempt in range(1, max_attempts + 1):
         try:
@@ -88,43 +152,83 @@ def download_single_shard(index):
     return False
 
 
-def download_data(num_shards, download_workers=8):
-    """Download training shards + pinned validation shard."""
-    os.makedirs(DATA_DIR, exist_ok=True)
-    num_train = min(num_shards, MAX_SHARD)
-    ids = list(range(num_train))
-    if VAL_SHARD not in ids:
-        ids.append(VAL_SHARD)
+def download_data(lang="en", num_shards=10, download_workers=8):
+    """Download training shards for the given language. Returns val_filename."""
+    data_dir, _ = get_lang_dirs(lang)
+    os.makedirs(data_dir, exist_ok=True)
+    cfg = LANGUAGE_CONFIGS[lang]
 
-    # Count what's already downloaded
-    existing = sum(1 for i in ids if os.path.exists(os.path.join(DATA_DIR, f"shard_{i:05d}.parquet")))
-    if existing == len(ids):
-        print(f"Data: all {len(ids)} shards already downloaded at {DATA_DIR}")
-        return
+    if cfg["type"] == "climbmix":
+        # English: karpathy/climbmix-400b-shuffle
+        num_train = min(num_shards, MAX_SHARD)
+        ids = list(range(num_train))
+        if VAL_SHARD not in ids:
+            ids.append(VAL_SHARD)
+        val_filename = VAL_FILENAME
+        shard_args = [
+            (f"shard_{i:05d}.parquet", f"{BASE_URL}/shard_{i:05d}.parquet", data_dir)
+            for i in ids
+        ]
+    else:
+        # Wikipedia language
+        wiki_code = cfg["wiki_code"]
+        print(f"Data: discovering {cfg['name']} Wikipedia shards...")
+        try:
+            all_shards = get_wikipedia_shard_list(wiki_code)
+        except Exception as e:
+            print(f"Data: failed to fetch shard list for {wiki_code}: {e}")
+            return VAL_FILENAME
+        # Use last shard as val, rest as train (capped by num_shards)
+        val_filename = all_shards[-1][0]
+        if len(all_shards) == 1:
+            # Only 1 shard available (small language) — use it for both train and val
+            print(f"Data: only 1 shard available for {cfg['name']}, using it for both train and val.")
+            shards_to_download = all_shards
+        else:
+            train_shards = all_shards[:-1]
+            if num_shards > 0:
+                train_shards = train_shards[:num_shards]
+            shards_to_download = train_shards + [all_shards[-1]]
+        shard_args = [(fname, url, data_dir) for fname, url in shards_to_download]
 
-    needed = len(ids) - existing
+    # Count already downloaded
+    existing = sum(1 for fname, _, d in shard_args if os.path.exists(os.path.join(d, fname)))
+    if existing == len(shard_args):
+        print(f"Data: all {len(shard_args)} shards already downloaded at {data_dir}")
+        save_lang_meta(lang, val_filename, len(shard_args))
+        return val_filename
+
+    needed = len(shard_args) - existing
     print(f"Data: downloading {needed} shards ({existing} already exist)...")
-
     workers = max(1, min(download_workers, needed))
     with Pool(processes=workers) as pool:
-        results = pool.map(download_single_shard, ids)
+        results = pool.map(download_single_shard, shard_args)
 
     ok = sum(1 for r in results if r)
-    print(f"Data: {ok}/{len(ids)} shards ready at {DATA_DIR}")
+    print(f"Data: {ok}/{len(shard_args)} shards ready at {data_dir}")
+    save_lang_meta(lang, val_filename, len(shard_args))
+    return val_filename
 
 # ---------------------------------------------------------------------------
 # Tokenizer training
 # ---------------------------------------------------------------------------
 
-def list_parquet_files():
+def list_parquet_files(data_dir=None):
     """Return sorted list of parquet file paths in the data directory."""
-    files = sorted(f for f in os.listdir(DATA_DIR) if f.endswith(".parquet") and not f.endswith(".tmp"))
-    return [os.path.join(DATA_DIR, f) for f in files]
+    if data_dir is None:
+        data_dir = DATA_DIR
+    files = sorted(f for f in os.listdir(data_dir) if f.endswith(".parquet") and not f.endswith(".tmp"))
+    return [os.path.join(data_dir, f) for f in files]
 
 
-def text_iterator(max_chars=1_000_000_000, doc_cap=10_000):
+def text_iterator(max_chars=1_000_000_000, doc_cap=10_000, data_dir=None, val_filename=None):
     """Yield documents from training split (all shards except pinned val shard)."""
-    parquet_paths = [p for p in list_parquet_files() if not p.endswith(VAL_FILENAME)]
+    if data_dir is None:
+        data_dir = DATA_DIR
+    if val_filename is None:
+        val_filename = VAL_FILENAME
+    all_paths = list_parquet_files(data_dir)
+    parquet_paths = [p for p in all_paths if not p.endswith(val_filename)] or all_paths
     nchars = 0
     for filepath in parquet_paths:
         pf = pq.ParquetFile(filepath)
@@ -138,20 +242,27 @@ def text_iterator(max_chars=1_000_000_000, doc_cap=10_000):
                     return
 
 
-def train_tokenizer():
+def train_tokenizer(data_dir=None, tokenizer_dir=None, val_filename=None):
     """Train BPE tokenizer using rustbpe, save as tiktoken pickle."""
-    tokenizer_pkl = os.path.join(TOKENIZER_DIR, "tokenizer.pkl")
-    token_bytes_path = os.path.join(TOKENIZER_DIR, "token_bytes.pt")
+    if data_dir is None:
+        data_dir = DATA_DIR
+    if tokenizer_dir is None:
+        tokenizer_dir = TOKENIZER_DIR
+    if val_filename is None:
+        val_filename = VAL_FILENAME
+
+    tokenizer_pkl = os.path.join(tokenizer_dir, "tokenizer.pkl")
+    token_bytes_path = os.path.join(tokenizer_dir, "token_bytes.pt")
 
     if os.path.exists(tokenizer_pkl) and os.path.exists(token_bytes_path):
-        print(f"Tokenizer: already trained at {TOKENIZER_DIR}")
+        print(f"Tokenizer: already trained at {tokenizer_dir}")
         return
 
-    os.makedirs(TOKENIZER_DIR, exist_ok=True)
+    os.makedirs(tokenizer_dir, exist_ok=True)
 
-    parquet_files = list_parquet_files()
-    if len(parquet_files) < 2:
-        print("Tokenizer: need at least 2 data shards (1 train + 1 val). Download more data first.")
+    parquet_files = list_parquet_files(data_dir)
+    if len(parquet_files) < 1:
+        print("Tokenizer: no data shards found. Download data first.")
         sys.exit(1)
 
     # --- Train with rustbpe ---
@@ -160,7 +271,11 @@ def train_tokenizer():
 
     tokenizer = rustbpe.Tokenizer()
     vocab_size_no_special = VOCAB_SIZE - len(SPECIAL_TOKENS)
-    tokenizer.train_from_iterator(text_iterator(), vocab_size_no_special, pattern=SPLIT_PATTERN)
+    tokenizer.train_from_iterator(
+        text_iterator(data_dir=data_dir, val_filename=val_filename),
+        vocab_size_no_special,
+        pattern=SPLIT_PATTERN,
+    )
 
     # Build tiktoken encoding from trained merges
     pattern = tokenizer.get_pattern()
@@ -196,7 +311,7 @@ def train_tokenizer():
     print(f"Tokenizer: saved token_bytes to {token_bytes_path}")
 
     # Sanity check
-    test = "Hello world! Numbers: 123. Unicode: 你好"
+    test = "Hello world! Numbers: 123."
     encoded = enc.encode_ordinary(test)
     decoded = enc.decode(encoded)
     assert decoded == test, f"Tokenizer roundtrip failed: {test!r} -> {decoded!r}"
@@ -245,19 +360,26 @@ class Tokenizer:
         return self.enc.decode(ids)
 
 
-def get_token_bytes(device="cpu"):
-    path = os.path.join(TOKENIZER_DIR, "token_bytes.pt")
+def get_token_bytes(device="cpu", tokenizer_dir=None):
+    if tokenizer_dir is None:
+        tokenizer_dir = TOKENIZER_DIR
+    path = os.path.join(tokenizer_dir, "token_bytes.pt")
     with open(path, "rb") as f:
         return torch.load(f, map_location=device)
 
 
-def _document_batches(split, tokenizer_batch_size=128):
+def _document_batches(split, tokenizer_batch_size=128, data_dir=None, val_filename=None):
     """Infinite iterator over document batches from parquet files."""
-    parquet_paths = list_parquet_files()
+    if data_dir is None:
+        data_dir = DATA_DIR
+    if val_filename is None:
+        val_filename = VAL_FILENAME
+    parquet_paths = list_parquet_files(data_dir)
     assert len(parquet_paths) > 0, "No parquet files found. Run prepare.py first."
-    val_path = os.path.join(DATA_DIR, VAL_FILENAME)
+    val_path = os.path.join(data_dir, val_filename)
     if split == "train":
-        parquet_paths = [p for p in parquet_paths if p != val_path]
+        train_paths = [p for p in parquet_paths if p != val_path]
+        parquet_paths = train_paths or parquet_paths  # fallback: single-shard languages
     else:
         parquet_paths = [val_path]
     epoch = 1
@@ -283,7 +405,7 @@ def _get_device():
         return "cpu"
 
 
-def make_dataloader(tokenizer, B, T, split, buffer_size=1000, device=None):
+def make_dataloader(tokenizer, B, T, split, buffer_size=1000, device=None, data_dir=None, val_filename=None):
     """
     BOS-aligned dataloader with best-fit packing.
     Every row starts with BOS. Documents packed using best-fit to minimize cropping.
@@ -292,10 +414,10 @@ def make_dataloader(tokenizer, B, T, split, buffer_size=1000, device=None):
     """
     if device is None:
         device = _get_device()
-    
+
     assert split in ["train", "val"]
     row_capacity = T + 1
-    batches = _document_batches(split)
+    batches = _document_batches(split, data_dir=data_dir, val_filename=val_filename)
     bos_token = tokenizer.get_bos_token_id()
     doc_buffer = []
     epoch = 1
@@ -358,19 +480,29 @@ def make_dataloader(tokenizer, B, T, split, buffer_size=1000, device=None):
 # ---------------------------------------------------------------------------
 
 @torch.no_grad()
-def evaluate_bpb(model, tokenizer, batch_size, device=None):
+def evaluate_bpb(model, tokenizer, batch_size, device=None, seq_len=None, max_steps=None, data_dir=None, val_filename=None):
     """
     Bits per byte (BPB): vocab size-independent evaluation metric.
     Sums per-token cross-entropy (in nats), sums target byte lengths,
     then converts nats/byte to bits/byte. Special tokens (byte length 0)
     are excluded from both sums.
-    Uses fixed MAX_SEQ_LEN so results are comparable across configs.
+    seq_len defaults to MAX_SEQ_LEN (2048). Pass the training seq_len
+    when the model was trained on a shorter context (e.g. MPS with 512).
+    max_steps caps the number of eval steps (useful for short time budgets).
     """
     if device is None:
         device = _get_device()
-    token_bytes = get_token_bytes(device=device)
-    val_loader = make_dataloader(tokenizer, batch_size, MAX_SEQ_LEN, "val", device=device)
-    steps = EVAL_TOKENS // (batch_size * MAX_SEQ_LEN)
+    if seq_len is None:
+        seq_len = MAX_SEQ_LEN
+    # Infer tokenizer_dir from data_dir location if possible
+    tokenizer_dir = None
+    if data_dir is not None:
+        tokenizer_dir = os.path.join(os.path.dirname(data_dir), "tokenizer")
+    token_bytes = get_token_bytes(device=device, tokenizer_dir=tokenizer_dir)
+    val_loader = make_dataloader(tokenizer, batch_size, seq_len, "val", device=device, data_dir=data_dir, val_filename=val_filename)
+    steps = EVAL_TOKENS // (batch_size * seq_len)
+    if max_steps is not None:
+        steps = min(steps, max_steps)
     total_nats = 0.0
     total_bytes = 0
     for _ in range(steps):
@@ -389,20 +521,28 @@ def evaluate_bpb(model, tokenizer, batch_size, device=None):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Prepare data and tokenizer for autoresearch")
-    parser.add_argument("--num-shards", type=int, default=10, help="Number of training shards to download (-1 = all). Val shard is always pinned.")
-    parser.add_argument("--download-workers", type=int, default=8, help="Number of parallel download workers")
+    parser.add_argument("--language", type=str, default="en", choices=list(LANGUAGE_CONFIGS.keys()),
+                        help="Language to prepare data for")
+    parser.add_argument("--num-shards", type=int, default=10,
+                        help="Number of training shards to download (-1 = all). Val shard is always pinned.")
+    parser.add_argument("--download-workers", type=int, default=8,
+                        help="Number of parallel download workers")
     args = parser.parse_args()
 
+    lang = args.language
+    lang_cfg = LANGUAGE_CONFIGS[lang]
+    data_dir, tokenizer_dir = get_lang_dirs(lang)
     num_shards = MAX_SHARD if args.num_shards == -1 else args.num_shards
 
-    print(f"Cache directory: {CACHE_DIR}")
+    print(f"Language:        {lang_cfg['name']} ({lang})")
+    print(f"Cache directory: {os.path.join(CACHE_DIR, lang)}")
     print()
 
     # Step 1: Download data
-    download_data(num_shards, download_workers=args.download_workers)
+    val_filename = download_data(lang=lang, num_shards=num_shards, download_workers=args.download_workers)
     print()
 
     # Step 2: Train tokenizer
-    train_tokenizer()
+    train_tokenizer(data_dir=data_dir, tokenizer_dir=tokenizer_dir, val_filename=val_filename)
     print()
     print("Done! Ready to train.")
