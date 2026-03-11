@@ -837,7 +837,7 @@ MATRIX_LR         = 0.04
 SCALAR_LR         = 0.5
 WEIGHT_DECAY      = 0.2
 ADAM_BETAS        = (0.8, 0.95)
-WARMUP_RATIO      = 0.0            # fraction of budget for LR warmup
+WARMUP_RATIO      = 0.05           # fraction of budget for LR warmup
 WARMDOWN_RATIO    = 0.5            # fraction of budget for LR cooldown
 FINAL_LR_FRAC     = 0.0            # final LR as fraction of peak
 
