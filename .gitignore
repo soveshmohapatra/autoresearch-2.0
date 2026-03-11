@@ -38,4 +38,16 @@ checkpoints/
 *.swp
 *.swo
 
+# macOS
+.DS_Store
+
+# Optuna database
+optuna_study.db
+
+# Generated assets
+linkedin_post_image.png
+
+# Claude Code session files
+.claude/
+
 blog.tex

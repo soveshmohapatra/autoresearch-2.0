@@ -55,10 +55,9 @@ The dashboard handles everything from there:
 ```
 What would you like to do?
   1. View model catalog
-  2. Run an experiment
-  3. Run agent + Optuna together
-  4. View experiment history
-  5. Detect hardware
+  2. Run agent + Optuna together
+  3. View experiment history
+  4. Detect hardware
   q. Quit
 ```
 
@@ -99,7 +98,8 @@ Let Claude propose and test architecture changes overnight.
 2. `claude` CLI — Claude Code (if installed, detected via `shutil.which("claude")`)
 
 ```bash
-# Via GUI — pick option 3 "Run agent + Optuna together"
+# Via GUI — pick option 2 "Run agent + Optuna together"
+# Prompts for: language, max runs, time budget per experiment, Optuna study name
 uv run python gui.py
 
 # Or via command line
@@ -162,10 +162,10 @@ The search space covers:
 
 ## Run Everything at Once
 
-The easiest way — pick option **3** in the GUI:
+The easiest way — pick option **2** in the GUI:
 
 ```bash
-uv run python gui.py   # → choose "3. Run agent + Optuna together"
+uv run python gui.py   # → choose "2. Run agent + Optuna together"
 ```
 
 Or from the command line:
