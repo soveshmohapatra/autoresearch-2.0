@@ -561,18 +561,23 @@ class Dashboard:
         language = self.pick_language()
         lang_name = LANGUAGE_OPTIONS.get(language, language)
 
-        agent_runs_str = Prompt.ask("Max agent experiments (0 = infinite)", default="0")
-        study_name     = Prompt.ask("Optuna study name", default="autoresearch_hpo")
+        agent_runs_str  = Prompt.ask("Max agent experiments (0 = infinite)", default="0")
+        time_budget_str = Prompt.ask("Time budget per experiment (seconds)", default="300")
+        study_name      = Prompt.ask("Optuna study name", default="autoresearch_hpo")
         try:
             agent_runs = int(agent_runs_str)
         except ValueError:
             agent_runs = 0
+        try:
+            time_budget = max(30, int(time_budget_str))
+        except ValueError:
+            time_budget = 300
 
         Path("logs").mkdir(exist_ok=True)
         agent_log = Path("logs/agent.log")
 
         agent_cmd = [sys.executable, "agent.py", "--use-optuna", "--study-name", study_name,
-                     "--language", language]
+                     "--language", language, "--time-budget", str(time_budget)]
         if agent_runs:
             agent_cmd += ["--max-runs", str(agent_runs)]
 
