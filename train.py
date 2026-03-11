@@ -806,8 +806,8 @@ class Adafactor(torch.optim.Optimizer):
 # ===========================================================================
 
 # --- Model architecture ---
-DEPTH         = 8           # number of transformer layers
-ASPECT_RATIO  = 64          # model_dim = depth * aspect_ratio (must give model_dim % head_dim == 0)
+DEPTH         = 4           # number of transformer layers
+ASPECT_RATIO  = 32          # model_dim = depth * aspect_ratio (must give model_dim % head_dim == 0)
 HEAD_DIM      = 128         # attention head dimension (keep at 128)
 WINDOW_PATTERN = "SSSL"     # attention pattern: L=full context, S=half context
 
@@ -839,13 +839,12 @@ FINAL_LR_FRAC     = 0.0            # final LR as fraction of peak
 # --- Training ---
 TIME_BUDGET       = 300            # seconds of training (wall clock, excl. startup)
 TOTAL_BATCH_SIZE  = 2**19          # ~524K tokens per optimizer step
-DEVICE_BATCH_SIZE = 128            # per-device batch size (reduce if OOM)
-MAX_SEQ_LEN       = MAX_SEQ_LEN    # inherits from prepare.py (2048); override here if needed
+DEVICE_BATCH_SIZE = 4              # per-device batch size (reduce if OOM)
+MAX_SEQ_LEN       = 512            # MPS hard limit
 GRAD_CLIP         = 1.0            # gradient clipping norm (0.0 = disabled)
 
 # ===========================================================================
 # END AGENT EDIT ZONE
-# ===========================================================================
 
 # CLI overrides — only apply when the flag is explicitly passed (used by gui.py / run_loop.py)
 if args.depth is not None:        DEPTH = args.depth
