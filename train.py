@@ -1,7 +1,13 @@
 """
 Autoresearch pretraining script. Multi-platform support (CUDA/MPS/CPU).
-Enhanced with: Architecture variants, Optimizer zoo, W&B tracking, Checkpointing.
-Usage: uv run train.py [--depth 8] [--aspect-ratio 64] [--batch-size 64] ...
+Enhanced with: Architecture variants, Optimizer zoo, Checkpointing, Optuna HPO, Agent loop.
+
+Usage:
+  uv run python train.py                              # single training run
+  uv run python train.py --optuna                     # Bayesian HPO (20 trials)
+  uv run python train.py --agent                      # autonomous Claude agent loop
+  uv run python train.py --agent --max-runs 20        # agent, stop after 20 experiments
+  uv run python train.py --agent --dry-run            # agent: propose only, don't train
 """
 
 from __future__ import annotations
@@ -55,6 +61,12 @@ def parse_args():
     parser.add_argument("--study-name", type=str, default="autoresearch_hpo", help="Optuna study name")
     parser.add_argument("--optuna-resume", action="store_true", help="Resume an existing Optuna study from DB")
     parser.add_argument("--best", action="store_true", help="Print best Optuna params from existing study and exit")
+
+    # Autonomous agent loop
+    parser.add_argument("--agent", action="store_true", help="Run autonomous Claude agent loop")
+    parser.add_argument("--max-runs", type=int, default=0, help="Max agent experiments (0 = infinite)")
+    parser.add_argument("--dry-run", action="store_true", help="Agent: propose edits but don't train")
+    parser.add_argument("--tag", type=str, default=None, help="Agent: git branch tag (e.g. mar10)")
 
     return parser.parse_args()
 
@@ -186,6 +198,245 @@ if args.optuna or args.best:
     _pruned = [t for t in _study.trials if t.state == optuna.trial.TrialState.PRUNED]
     print(f"Completed: {len(_done)}  Pruned: {len(_pruned)}")
     print(f"Results log: optuna_trials.jsonl  |  DB: optuna_study.db")
+    sys.exit(0)
+
+# ---------------------------------------------------------------------------
+# Autonomous agent loop (runs as subprocess experiments, exits early)
+# ---------------------------------------------------------------------------
+
+if args.agent:
+    import re as _re
+    import subprocess as _subprocess
+    from pathlib import Path as _AgPath
+    from datetime import datetime as _AgDt
+
+    import anthropic as _anthropic
+
+    _TRAIN_PY    = _AgPath(__file__)
+    _RESULTS_TSV = _AgPath("results.tsv")
+    _MODEL       = "claude-opus-4-6"
+    _ZONE_START  = "# ==========================================================================="
+    _ZONE_HEADER = "# AGENT EDIT ZONE"
+    _ZONE_END    = "# END AGENT EDIT ZONE"
+
+    def _ag_run_cmd(cmd, check=True):
+        result = _subprocess.run(cmd, capture_output=True, text=True)
+        if check and result.returncode != 0:
+            raise RuntimeError(f"Command failed: {' '.join(cmd)}\n{result.stderr}")
+        return result.stdout.strip()
+
+    def _ag_get_zone(path):
+        lines = path.read_text().splitlines()
+        in_zone, zone_lines = False, []
+        for line in lines:
+            if _ZONE_HEADER in line:
+                in_zone = True
+            if in_zone:
+                zone_lines.append(line)
+            if in_zone and _ZONE_END in line:
+                break
+        return "\n".join(zone_lines)
+
+    def _ag_apply_zone(path, new_zone):
+        lines = path.read_text().splitlines()
+        start_idx = end_idx = None
+        for i, line in enumerate(lines):
+            if _ZONE_HEADER in line and start_idx is None:
+                for j in range(i, max(i - 3, -1), -1):
+                    if _ZONE_START in lines[j]:
+                        start_idx = j
+                        break
+                if start_idx is None:
+                    start_idx = i
+            if start_idx is not None and _ZONE_END in line:
+                for j in range(i, min(i + 3, len(lines))):
+                    if _ZONE_START in lines[j]:
+                        end_idx = j + 1
+                        break
+                if end_idx is None:
+                    end_idx = i + 1
+                break
+        if start_idx is None or end_idx is None:
+            raise ValueError("Could not locate AGENT EDIT ZONE in train.py")
+        new_lines = lines[:start_idx] + new_zone.splitlines() + lines[end_idx:]
+        path.write_text("\n".join(new_lines) + "\n")
+
+    def _ag_get_results():
+        if not _RESULTS_TSV.exists():
+            return "(no results yet)"
+        lines = _RESULTS_TSV.read_text().splitlines()
+        header = lines[0] if lines else ""
+        rows = lines[1:][-20:]
+        return "\n".join([header] + rows) if rows else "(no experiments yet)"
+
+    def _ag_detect_device():
+        try:
+            out = _ag_run_cmd([sys.executable, "run_loop.py", "--detect"], check=False)
+            for line in out.splitlines():
+                if line.startswith("device:"):
+                    return line.split(":", 1)[1].strip()
+            if "mps" in out.lower():  return "mps"
+            if "cuda" in out.lower(): return "cuda"
+        except Exception:
+            pass
+        return "unknown"
+
+    def _ag_build_system_prompt():
+        return (
+            "You are an autonomous ML research agent running Autoresearch 2.0 experiments.\n\n"
+            "Your job: propose and implement ONE experiment per turn to minimize val_bpb "
+            "(bits per byte) on a language model trained for 5 minutes.\n\n"
+            "You will receive:\n"
+            "- The current AGENT EDIT ZONE from train.py\n"
+            "- The experiment history (results.tsv)\n"
+            "- Hardware info (device, constraints)\n\n"
+            "You must respond with EXACTLY two sections:\n\n"
+            "DESCRIPTION: <one-line description of the change, ≤80 chars>\n\n"
+            "AGENT EDIT ZONE:\n```python\n"
+            "# ===========================================================================\n"
+            "# AGENT EDIT ZONE\n"
+            "# This is the only section you need to modify to run experiments.\n"
+            "# Edit these constants directly — changes take effect immediately on next run.\n"
+            "# ===========================================================================\n\n"
+            "<full AGENT EDIT ZONE contents with your change applied>\n\n"
+            "# ===========================================================================\n"
+            "# END AGENT EDIT ZONE\n"
+            "# ===========================================================================\n```\n\n"
+            "Rules:\n"
+            "- Change exactly ONE thing per experiment (one variable or one flag).\n"
+            "- Keep all other constants at their current values.\n"
+            "- Never add imports, functions, or code outside the AGENT EDIT ZONE.\n"
+            "- Never change TOTAL_BATCH_SIZE beyond 2**21 (memory risk).\n"
+            "- On MPS (Apple Silicon), DEPTH≤4, ASPECT_RATIO≤32, DEVICE_BATCH_SIZE≤4, MAX_SEQ_LEN≤512 are hard limits.\n"
+            "- Respond with ONLY the two sections above. No extra explanation."
+        )
+
+    def _ag_build_user_prompt(edit_zone, results, device):
+        return (
+            f"## Current AGENT EDIT ZONE (train.py)\n\n```python\n{edit_zone}\n```\n\n"
+            f"## Experiment history (results.tsv, newest last)\n\n```\n{results}\n```\n\n"
+            f"## Hardware\n\nDevice: {device}\n\n"
+            "## Task\n\nPropose the single most promising change to minimize val_bpb.\n"
+            "Think step-by-step about what the history shows, then propose ONE change."
+        )
+
+    def _ag_parse_response(response):
+        desc_match = _re.search(r"DESCRIPTION:\s*(.+?)(?:\n|$)", response, _re.IGNORECASE)
+        description = desc_match.group(1).strip() if desc_match else f"auto_{_AgDt.now().strftime('%m%d_%H%M')}"
+        zone_match = _re.search(
+            r"```python\s*(# =+\s*# AGENT EDIT ZONE.+?# END AGENT EDIT ZONE\s*# =+)\s*```",
+            response, _re.DOTALL | _re.IGNORECASE,
+        )
+        if not zone_match:
+            zone_match = _re.search(
+                r"```python\s*(# AGENT EDIT ZONE.+?# END AGENT EDIT ZONE)\s*```",
+                response, _re.DOTALL | _re.IGNORECASE,
+            )
+        if not zone_match:
+            raise ValueError(f"Could not parse AGENT EDIT ZONE from Claude response:\n{response[:500]}")
+        return description, zone_match.group(1).strip()
+
+    def _ag_run_experiment(description, dry_run=False):
+        _ag_run_cmd(["git", "add", "train.py"])
+        _ag_run_cmd(["git", "commit", "-m", f"experiment: {description}"])
+        commit = _ag_run_cmd(["git", "rev-parse", "--short", "HEAD"])
+        print(f"  Committed: {commit}")
+        if dry_run:
+            print("  [dry-run] Skipping actual training run.")
+            return False
+        result = _subprocess.run(
+            [sys.executable, "run_loop.py", "--auto", "--desc", description, "--no-memory"],
+            capture_output=False,
+        )
+        return result.returncode == 0
+
+    # Setup branch if requested
+    if args.tag:
+        _branch = f"autoresearch/{args.tag}"
+        try:
+            _ag_run_cmd(["git", "checkout", "-b", _branch])
+            print(f"Created branch: {_branch}")
+        except RuntimeError:
+            _ag_run_cmd(["git", "checkout", _branch])
+            print(f"Switched to branch: {_branch}")
+
+    _ag_api_key = os.environ.get("ANTHROPIC_API_KEY")
+    if not _ag_api_key:
+        print("ERROR: ANTHROPIC_API_KEY not set.")
+        print("  export ANTHROPIC_API_KEY=sk-ant-...")
+        sys.exit(1)
+
+    _ag_client        = _anthropic.Anthropic(api_key=_ag_api_key)
+    _ag_device        = _ag_detect_device()
+    _ag_system_prompt = _ag_build_system_prompt()
+    _ag_run_count     = 0
+
+    print(f"Branch: {_ag_run_cmd(['git', 'branch', '--show-current'], check=False)}")
+    print(f"Device: {_ag_device}")
+    print("\n" + "="*60)
+    print("AUTORESEARCH 2.0 AGENT LOOP — Press Ctrl+C to stop")
+    print("="*60 + "\n")
+
+    while True:
+        if args.max_runs > 0 and _ag_run_count >= args.max_runs:
+            print(f"Reached max runs ({args.max_runs}). Stopping.")
+            break
+
+        _ag_run_count += 1
+        print(f"\n{'─'*60}")
+        print(f"Run #{_ag_run_count}  |  {_AgDt.now().strftime('%H:%M:%S')}")
+        print(f"{'─'*60}")
+
+        _ag_edit_zone = _ag_get_zone(_TRAIN_PY)
+        _ag_results   = _ag_get_results()
+        print("Asking Claude for next experiment...")
+
+        try:
+            _ag_msg = _ag_client.messages.create(
+                model=_MODEL,
+                max_tokens=2048,
+                system=_ag_system_prompt,
+                messages=[{"role": "user", "content": _ag_build_user_prompt(
+                    _ag_edit_zone, _ag_results, _ag_device
+                )}],
+            )
+            _ag_response = _ag_msg.content[0].text
+        except Exception as _e:
+            print(f"  Claude API error: {_e}")
+            print("  Waiting 30s before retry...")
+            import time as _ag_time; _ag_time.sleep(30)
+            continue
+
+        try:
+            _ag_desc, _ag_new_zone = _ag_parse_response(_ag_response)
+        except ValueError as _e:
+            print(f"  Parse error: {_e}")
+            print("  Skipping this run.")
+            continue
+
+        print(f"  Proposal: {_ag_desc}")
+
+        if _ag_get_zone(_TRAIN_PY).strip() == _ag_new_zone.strip():
+            print("  Warning: Claude proposed no change. Skipping.")
+            continue
+
+        try:
+            _ag_apply_zone(_TRAIN_PY, _ag_new_zone)
+        except Exception as _e:
+            print(f"  Failed to apply edit: {_e}")
+            continue
+
+        try:
+            _ag_kept = _ag_run_experiment(_ag_desc, dry_run=args.dry_run)
+            print(f"  Result: {'kept' if _ag_kept else 'discarded/crashed'}")
+        except Exception as _e:
+            print(f"  Experiment failed: {_e}")
+            try:
+                _subprocess.run(["git", "reset", "--hard", "HEAD~1"], capture_output=True)
+                print("  Reverted failed commit.")
+            except Exception:
+                pass
+
     sys.exit(0)
 
 # Import configuration
