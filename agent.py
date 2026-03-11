@@ -136,7 +136,8 @@ def _call_via_api(client, system_prompt: str, user_prompt: str) -> str:
 def _call_via_cli(system_prompt: str, user_prompt: str) -> str:
     full_prompt = f"{system_prompt}\n\n{user_prompt}"
     result = subprocess.run(
-        ["claude", "-p", full_prompt],
+        ["claude", "-p"],
+        input=full_prompt,
         capture_output=True, text=True,
     )
     if result.returncode != 0:
