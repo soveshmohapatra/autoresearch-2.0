@@ -14,10 +14,11 @@ Train a real GPT-style language model from scratch — in your own language — 
 - Trains a GPT transformer from scratch on real Wikipedia data
 - Runs autonomous experiments: tweaks architecture or optimizer, trains 5 min, keeps improvements, discards regressions
 - Warm-starts every cycle from the previous best checkpoint — the model keeps getting better
-- Runs Optuna-powered hyperparameter search directly from `train.py` — no extra scripts
+- Runs Optuna-powered Bayesian hyperparameter search via `optuna_search.py`
 - Keeps only the **best + latest checkpoint** per language — no disk bloat
 - Works in 10 languages out of the box
 - Runs anywhere: CUDA, Apple Silicon, CPU
+- Single entry point — `run.py` dispatches to train, agent, optuna, or all at once
 
 ---
 
@@ -85,8 +86,9 @@ Let Claude propose and test architecture changes overnight:
 
 ```bash
 export ANTHROPIC_API_KEY=sk-ant-...
-uv run python agent.py           # runs forever
-uv run python agent.py --max-runs 20
+uv run python run.py agent                   # runs forever
+uv run python run.py agent --max-runs 20     # stop after 20 experiments
+uv run python run.py agent --dry-run         # propose changes without training
 ```
 
 The agent reads experiment history, proposes the next change, edits `train.py`, runs training, and records the result. ~12 experiments per hour. ~100 while you sleep.
@@ -100,8 +102,8 @@ The agent reads experiment history, proposes the next change, edits `train.py`, 
 uv run python prepare.py --language fr
 
 # Single training run
-uv run python train.py --language fr
-uv run python train.py --language fr --resume   # warm-start from checkpoint
+uv run python run.py train --language fr
+uv run python run.py train --language fr --resume   # warm-start from checkpoint
 
 # Hardware info
 uv run python run_loop.py --detect
@@ -114,20 +116,20 @@ uv run python gui.py --history
 
 ## Optuna Hyperparameter Search
 
-Bayesian HPO built directly into `train.py` — no separate script needed.
+Bayesian HPO via `optuna_search.py`, launched cleanly through `run.py`:
 
 ```bash
 # Run 20 trials (default), 300s each
-uv run python train.py --optuna
+uv run python run.py optuna
 
 # Custom: 50 trials, 120s budget, Hindi
-uv run python train.py --optuna --trials 50 --time-budget 120 --language hi
+uv run python run.py optuna --trials 50 --time-budget 120 --language hi
 
 # Resume a previous study (results stored in optuna_study.db)
-uv run python train.py --optuna --optuna-resume
+uv run python run.py optuna --resume
 
 # Print the best params found so far and exit
-uv run python train.py --best
+uv run python run.py optuna --best
 ```
 
 Optuna uses the **TPE sampler** (Bayesian, learns from prior trials) with **MedianPruner** to kill bad trials early. Results are persisted in `optuna_study.db` so you can resume or inspect at any time.
@@ -137,6 +139,22 @@ The search space covers:
 - `MATRIX_LR`, `WEIGHT_DECAY`
 - `USE_SWIGLU`, `USE_PRENORM`, `USE_WEIGHT_TYING`
 - `OPTIMIZER_TYPE`
+
+---
+
+## Run Everything at Once
+
+Launch the agent and Optuna in parallel with a single command:
+
+```bash
+# Agent + Optuna together, forever
+uv run python run.py all
+
+# Custom: 20 agent runs, 30 Optuna trials, Hindi, 120s per trial
+uv run python run.py all --agent-runs 20 --optuna-trials 30 --language hi --time-budget 120
+```
+
+Both processes run in the background, writing to `logs/agent.log` and `logs/optuna.log`. Output is streamed live to the terminal. Press Ctrl+C to stop both cleanly.
 
 ---
 
@@ -204,21 +222,17 @@ GRAD_CLIP         = 1.0
 
 ```
 autoresearch-2.0/
-├── gui.py          — Terminal dashboard (main entry point)
-├── train.py        — Model + training loop (AGENT EDIT ZONE + Optuna HPO inside)
-├── prepare.py      — Data download, tokenizer, evaluation
-├── agent.py        — Autonomous Claude API agent
-├── run_loop.py     — Experiment runner: git → train → record → keep/discard
-├── config.py       — Hardware and experiment configuration
-├── hardware.py     — Hardware detection
-├── models.py       — Model catalog
-├── program.md      — Agent instructions
-└── agents/
-    ├── memory.py   — Persistent experiment history
-    ├── analyst.py
-    ├── architecture.py
-    ├── optimizer.py
-    └── hyperparameter.py
+├── run.py              — Unified launcher (train / agent / optuna / all)
+├── train.py            — Model + training loop (AGENT EDIT ZONE)
+├── agent.py            — Autonomous Claude API agent
+├── optuna_search.py    — Bayesian hyperparameter search (Optuna TPE)
+├── gui.py              — Terminal dashboard
+├── run_loop.py         — Experiment runner: git → train → record → keep/discard
+├── prepare.py          — Data download, tokenizer, evaluation
+├── config.py           — Hardware and experiment configuration
+├── hardware.py         — Hardware detection
+├── models.py           — Model catalog
+└── program.md          — Agent instructions
 ```
 
 ---
