@@ -324,7 +324,7 @@ def detect_device() -> str:
     return "unknown"
 
 
-def run_experiment(description: str, dry_run: bool = False, language: str | None = None) -> bool:
+def run_experiment(description: str, dry_run: bool = False, language: str | None = None, time_budget: int | None = None) -> bool:
     """
     Commit current train.py and run the experiment via run_loop.py --auto.
     Returns True if the experiment was kept.
@@ -342,6 +342,8 @@ def run_experiment(description: str, dry_run: bool = False, language: str | None
     cmd = [_PYTHON, "run_loop.py", "--auto", "--desc", description, "--no-memory"]
     if language:
         cmd += ["--language", language]
+    if time_budget is not None:
+        cmd += ["--time-budget", str(time_budget)]
     result = subprocess.run(cmd, capture_output=False)
     return result.returncode == 0
 
@@ -354,6 +356,7 @@ def main():
     parser.add_argument("--use-optuna", action="store_true", help="Use Optuna TPE for hyperparameter hints")
     parser.add_argument("--study-name", default="autoresearch_hpo", help="Optuna study name")
     parser.add_argument("--language", type=str, default=None, help="Language code (en, hi, fr, etc.)")
+    parser.add_argument("--time-budget", type=int, default=None, help="Override TIME_BUDGET per run (seconds)")
     args = parser.parse_args()
 
     api_key = os.environ.get("ANTHROPIC_API_KEY")
@@ -460,7 +463,7 @@ def main():
             continue
 
         try:
-            kept = run_experiment(description, dry_run=args.dry_run, language=language)
+            kept = run_experiment(description, dry_run=args.dry_run, language=language, time_budget=args.time_budget)
             print(f"  Result: {'kept' if kept else 'discarded/crashed'}")
             if study is not None and optuna_trial is not None:
                 val_bpb = get_last_val_bpb()
