@@ -133,12 +133,23 @@ def _call_via_api(client, system_prompt: str, user_prompt: str) -> str:
     return message.content[0].text
 
 
+_CLI_DEBUG_LOG = Path("logs/claude_debug.log")
+
+
 def _call_via_cli(system_prompt: str, user_prompt: str) -> str:
     full_prompt = f"{system_prompt}\n\n{user_prompt}"
     result = subprocess.run(
         ["claude", "-p"],
         input=full_prompt,
         capture_output=True, text=True,
+        env={**os.environ, "CLAUDECODE": ""},  # allow nested CLI calls
+    )
+    # Write full raw output for debugging
+    _CLI_DEBUG_LOG.parent.mkdir(exist_ok=True)
+    _CLI_DEBUG_LOG.write_text(
+        f"returncode: {result.returncode}\n"
+        f"=== stdout ===\n{result.stdout}\n"
+        f"=== stderr ===\n{result.stderr}\n"
     )
     if result.returncode != 0:
         raise RuntimeError(f"claude CLI error:\n{result.stderr.strip()}")
@@ -206,23 +217,42 @@ Propose the single most promising change to minimize val_bpb.
 Think step-by-step about what the history shows, then propose ONE change."""
 
 
+def _clean_cli_response(response: str) -> str:
+    """Strip thinking blocks and ANSI that claude CLI may prepend."""
+    # Remove <antml_thinking>...</antml_thinking> blocks
+    response = re.sub(r"<antml_thinking>.*?</antml_thinking>", "", response, flags=re.DOTALL)
+    # Remove ANSI escape codes
+    response = re.sub(r"\x1b\[[0-9;]*m", "", response)
+    return response.strip()
+
+
 def parse_claude_response(response: str) -> tuple[str, str]:
     """Parse DESCRIPTION and AGENT EDIT ZONE from Claude's response."""
+    response = _clean_cli_response(response)
+
     desc_match = re.search(r"DESCRIPTION:\s*(.+?)(?:\n|$)", response, re.IGNORECASE)
     description = desc_match.group(1).strip() if desc_match else f"auto_{datetime.now().strftime('%m%d_%H%M')}"
 
+    # Format: ```python\n# ===\n# AGENT EDIT ZONE\n...\n# ===\n# END AGENT EDIT ZONE\n```
     zone_match = re.search(
-        r"```python\s*(# =+\s*# AGENT EDIT ZONE.+?# END AGENT EDIT ZONE\s*# =+)\s*```",
+        r"```python\s*(# =+\s*# AGENT EDIT ZONE\b.+?# =+\s*# END AGENT EDIT ZONE)\s*```",
         response, re.DOTALL | re.IGNORECASE
     )
     if not zone_match:
+        # Fallback: separator may be missing or in different position
         zone_match = re.search(
-            r"```python\s*(# AGENT EDIT ZONE.+?# END AGENT EDIT ZONE)\s*```",
+            r"```python\s*((?:# =+\s*)?# AGENT EDIT ZONE\b.+?(?:# =+\s*)?# END AGENT EDIT ZONE)\s*```",
             response, re.DOTALL | re.IGNORECASE
         )
 
     if not zone_match:
-        raise ValueError(f"Could not parse AGENT EDIT ZONE from Claude response:\n{response[:500]}")
+        # Write full response for diagnosis
+        _CLI_DEBUG_LOG.parent.mkdir(exist_ok=True)
+        (_CLI_DEBUG_LOG.parent / "parse_fail.log").write_text(response)
+        raise ValueError(
+            f"Could not parse AGENT EDIT ZONE from Claude response "
+            f"(full response saved to logs/parse_fail.log):\n{response[:1500]}"
+        )
 
     new_zone = zone_match.group(1).strip()
     return description, new_zone
