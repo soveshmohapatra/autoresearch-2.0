@@ -27,6 +27,10 @@ import argparse
 from pathlib import Path
 from datetime import datetime
 
+# Prefer the project venv Python so deps like rustbpe are available
+_venv_python = Path(__file__).parent / ".venv" / "bin" / "python3"
+_PYTHON = str(_venv_python) if _venv_python.exists() else sys.executable
+
 try:
     import anthropic as _anthropic_mod
 except ImportError:
@@ -307,7 +311,7 @@ def _detect_language() -> str:
 def detect_device() -> str:
     """Detect the hardware device string."""
     try:
-        result = run_cmd([sys.executable, "run_loop.py", "--detect"], check=False)
+        result = run_cmd([_PYTHON, "run_loop.py", "--detect"], check=False)
         for line in result.splitlines():
             if line.startswith("device:"):
                 return line.split(":", 1)[1].strip()
@@ -335,7 +339,7 @@ def run_experiment(description: str, dry_run: bool = False, language: str | None
         return False
 
     print(f"  Running experiment: {description}")
-    cmd = [sys.executable, "run_loop.py", "--auto", "--desc", description, "--no-memory"]
+    cmd = [_PYTHON, "run_loop.py", "--auto", "--desc", description, "--no-memory"]
     if language:
         cmd += ["--language", language]
     result = subprocess.run(cmd, capture_output=False)

@@ -26,6 +26,10 @@ import time
 from datetime import datetime
 from pathlib import Path
 
+# Prefer the project venv Python so deps like rustbpe are available
+_venv_python = Path(__file__).parent / ".venv" / "bin" / "python3"
+_PYTHON = str(_venv_python) if _venv_python.exists() else sys.executable
+
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -245,7 +249,7 @@ def main():
 
     # Run training
     log_path = "run.log"
-    train_cmd = [sys.executable, "train.py"]
+    train_cmd = [_PYTHON, "train.py"]
     if args.time_budget is not None:
         train_cmd += ["--time-budget", str(args.time_budget)]
     if args.language is not None:
