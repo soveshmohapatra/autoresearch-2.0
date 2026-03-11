@@ -1,7 +1,7 @@
 """
 agent.py — Autonomous Claude-powered research agent for Autoresearch 2.0
 
-Runs the experiment loop autonomously using the Anthropic API:
+Runs the experiment loop autonomously using the Anthropic API or Claude Code CLI:
   1. Reads experiment history + train.py AGENT EDIT ZONE
   2. Asks Claude to propose the next experiment change
   3. Applies the suggested edit to train.py
@@ -10,7 +10,7 @@ Runs the experiment loop autonomously using the Anthropic API:
 
 Usage:
   export ANTHROPIC_API_KEY=sk-ant-...
-  uv run python agent.py                    # run forever
+  uv run python agent.py                    # run forever (API key or claude CLI)
   uv run python agent.py --max-runs 20      # run 20 experiments
   uv run python agent.py --dry-run          # propose but don't run
   uv run python agent.py --tag mar10        # use existing branch tag
@@ -20,13 +20,17 @@ from __future__ import annotations
 import os
 import re
 import sys
+import shutil
 import time
 import subprocess
 import argparse
 from pathlib import Path
 from datetime import datetime
 
-import anthropic
+try:
+    import anthropic as _anthropic_mod
+except ImportError:
+    _anthropic_mod = None
 
 # ---------------------------------------------------------------------------
 # Config
@@ -116,8 +120,29 @@ def get_current_branch() -> str:
 
 
 # ---------------------------------------------------------------------------
-# Claude API
+# Claude — API or CLI
 # ---------------------------------------------------------------------------
+
+def _call_via_api(client, system_prompt: str, user_prompt: str) -> str:
+    message = client.messages.create(
+        model=MODEL,
+        max_tokens=2048,
+        system=system_prompt,
+        messages=[{"role": "user", "content": user_prompt}],
+    )
+    return message.content[0].text
+
+
+def _call_via_cli(system_prompt: str, user_prompt: str) -> str:
+    full_prompt = f"{system_prompt}\n\n{user_prompt}"
+    result = subprocess.run(
+        ["claude", "-p", full_prompt],
+        capture_output=True, text=True,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(f"claude CLI error:\n{result.stderr.strip()}")
+    return result.stdout.strip()
+
 
 def build_system_prompt() -> str:
     return """You are an autonomous ML research agent running Autoresearch 2.0 experiments.
@@ -252,12 +277,19 @@ def main():
     args = parser.parse_args()
 
     api_key = os.environ.get("ANTHROPIC_API_KEY")
-    if not api_key:
-        print("ERROR: ANTHROPIC_API_KEY not set.")
-        print("  export ANTHROPIC_API_KEY=sk-ant-...")
-        sys.exit(1)
+    client = None
+    use_cli = False
 
-    client = anthropic.Anthropic(api_key=api_key)
+    if api_key and _anthropic_mod:
+        client = _anthropic_mod.Anthropic(api_key=api_key)
+        print("Backend: Anthropic API")
+    elif shutil.which("claude"):
+        use_cli = True
+        print("Backend: claude CLI (Claude Code)")
+    else:
+        print("ERROR: No Claude backend found.")
+        print("  Set ANTHROPIC_API_KEY, or install Claude Code (https://claude.ai/code)")
+        sys.exit(1)
 
     if args.tag:
         branch = f"autoresearch/{args.tag}"
@@ -297,18 +329,13 @@ def main():
         print("Asking Claude for next experiment...")
 
         try:
-            message = client.messages.create(
-                model=MODEL,
-                max_tokens=2048,
-                system=system_prompt,
-                messages=[{
-                    "role": "user",
-                    "content": build_user_prompt(edit_zone, results, device)
-                }]
-            )
-            response = message.content[0].text
+            user_prompt = build_user_prompt(edit_zone, results, device)
+            if use_cli:
+                response = _call_via_cli(system_prompt, user_prompt)
+            else:
+                response = _call_via_api(client, system_prompt, user_prompt)
         except Exception as e:
-            print(f"  Claude API error: {e}")
+            print(f"  Claude error: {e}")
             print("  Waiting 30s before retry...")
             time.sleep(30)
             continue
