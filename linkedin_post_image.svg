@@ -1,0 +1,226 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="627" viewBox="0 0 1200 627">
+  <defs>
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#f8f9ff;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#eef1ff;stop-opacity:1" />
+    </linearGradient>
+    <linearGradient id="cardGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#ffffff;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#f5f7ff;stop-opacity:1" />
+    </linearGradient>
+    <linearGradient id="termGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" style="stop-color:#1e2030;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#151724;stop-opacity:1" />
+    </linearGradient>
+    <linearGradient id="accentGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" style="stop-color:#6366f1;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#8b5cf6;stop-opacity:1" />
+    </linearGradient>
+    <linearGradient id="barGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" style="stop-color:#6366f1;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#a78bfa;stop-opacity:1" />
+    </linearGradient>
+    <filter id="shadow" x="-5%" y="-5%" width="110%" height="120%">
+      <feDropShadow dx="0" dy="4" stdDeviation="16" flood-color="#6366f1" flood-opacity="0.12"/>
+    </filter>
+    <filter id="softShadow" x="-5%" y="-5%" width="110%" height="120%">
+      <feDropShadow dx="0" dy="2" stdDeviation="8" flood-color="#000" flood-opacity="0.08"/>
+    </filter>
+  </defs>
+
+  <!-- Background -->
+  <rect width="1200" height="627" fill="url(#bgGrad)"/>
+
+  <!-- Subtle grid dots -->
+  <pattern id="dots" x="0" y="0" width="40" height="40" patternUnits="userSpaceOnUse">
+    <circle cx="20" cy="20" r="1.2" fill="#6366f1" opacity="0.08"/>
+  </pattern>
+  <rect width="1200" height="627" fill="url(#dots)"/>
+
+  <!-- Left accent bar -->
+  <rect x="0" y="0" width="5" height="627" fill="url(#accentGrad)"/>
+
+  <!-- ── LEFT PANEL ── -->
+
+  <!-- Title block -->
+  <text x="68" y="100" font-family="'SF Pro Display', 'Helvetica Neue', Arial, sans-serif" font-size="15" font-weight="600" fill="#6366f1" letter-spacing="3" text-anchor="start">OPEN SOURCE PROJECT</text>
+
+  <text x="68" y="158" font-family="'SF Pro Display', 'Helvetica Neue', Arial, sans-serif" font-size="58" font-weight="800" fill="#0f0f23" letter-spacing="-1">Autoresearch</text>
+  <text x="68" y="218" font-family="'SF Pro Display', 'Helvetica Neue', Arial, sans-serif" font-size="58" font-weight="800" fill="url(#accentGrad)" letter-spacing="-1">2.0</text>
+
+  <text x="68" y="262" font-family="'SF Pro Display', 'Helvetica Neue', Arial, sans-serif" font-size="18" fill="#64748b" font-weight="400">Train GPT from scratch. Let AI run experiments overnight.</text>
+
+  <!-- Divider -->
+  <rect x="68" y="290" width="60" height="3" rx="2" fill="url(#accentGrad)"/>
+
+  <!-- Stat cards row -->
+  <!-- Card 1 -->
+  <rect x="68" y="318" width="148" height="88" rx="14" fill="url(#cardGrad)" filter="url(#softShadow)"/>
+  <rect x="68" y="318" width="148" height="4" rx="2" fill="url(#accentGrad)"/>
+  <text x="142" y="363" font-family="'SF Pro Display', 'Helvetica Neue', Arial, sans-serif" font-size="34" font-weight="800" fill="#0f0f23" text-anchor="middle">10</text>
+  <text x="142" y="388" font-family="'SF Pro Display', 'Helvetica Neue', Arial, sans-serif" font-size="12" fill="#64748b" text-anchor="middle" font-weight="500">LANGUAGES</text>
+
+  <!-- Card 2 -->
+  <rect x="232" y="318" width="148" height="88" rx="14" fill="url(#cardGrad)" filter="url(#softShadow)"/>
+  <rect x="232" y="318" width="148" height="4" rx="2" fill="url(#accentGrad)"/>
+  <text x="306" y="363" font-family="'SF Pro Display', 'Helvetica Neue', Arial, sans-serif" font-size="34" font-weight="800" fill="#0f0f23" text-anchor="middle">~12</text>
+  <text x="306" y="388" font-family="'SF Pro Display', 'Helvetica Neue', Arial, sans-serif" font-size="12" fill="#64748b" text-anchor="middle" font-weight="500">EXPERIMENTS/HR</text>
+
+  <!-- Card 3 -->
+  <rect x="396" y="318" width="148" height="88" rx="14" fill="url(#cardGrad)" filter="url(#softShadow)"/>
+  <rect x="396" y="318" width="148" height="4" rx="2" fill="url(#accentGrad)"/>
+  <text x="470" y="363" font-family="'SF Pro Display', 'Helvetica Neue', Arial, sans-serif" font-size="34" font-weight="800" fill="#0f0f23" text-anchor="middle">~100</text>
+  <text x="470" y="388" font-family="'SF Pro Display', 'Helvetica Neue', Arial, sans-serif" font-size="12" fill="#64748b" text-anchor="middle" font-weight="500">WHILE YOU SLEEP</text>
+
+  <!-- Feature bullets -->
+  <circle cx="84" cy="445" r="4" fill="#6366f1"/>
+  <text x="100" y="450" font-family="'SF Pro Display', 'Helvetica Neue', Arial, sans-serif" font-size="15" fill="#334155" font-weight="500">Autonomous Claude agent — proposes, trains, keeps best</text>
+
+  <circle cx="84" cy="478" r="4" fill="#8b5cf6"/>
+  <text x="100" y="483" font-family="'SF Pro Display', 'Helvetica Neue', Arial, sans-serif" font-size="15" fill="#334155" font-weight="500">Warm-start every cycle — model compounds over time</text>
+
+  <circle cx="84" cy="511" r="4" fill="#a78bfa"/>
+  <text x="100" y="516" font-family="'SF Pro Display', 'Helvetica Neue', Arial, sans-serif" font-size="15" fill="#334155" font-weight="500">CUDA · Apple Silicon · CPU — runs anywhere</text>
+
+  <!-- Platform badges -->
+  <rect x="68" y="548" width="82" height="28" rx="14" fill="#f1f5f9" stroke="#e2e8f0" stroke-width="1"/>
+  <text x="109" y="567" font-family="'SF Pro Display', 'Helvetica Neue', Arial, sans-serif" font-size="12" fill="#475569" text-anchor="middle" font-weight="600">H100 / A100</text>
+
+  <rect x="160" y="548" width="88" height="28" rx="14" fill="#f1f5f9" stroke="#e2e8f0" stroke-width="1"/>
+  <text x="204" y="567" font-family="'SF Pro Display', 'Helvetica Neue', Arial, sans-serif" font-size="12" fill="#475569" text-anchor="middle" font-weight="600">Apple Silicon</text>
+
+  <rect x="258" y="548" width="62" height="28" rx="14" fill="#f1f5f9" stroke="#e2e8f0" stroke-width="1"/>
+  <text x="289" y="567" font-family="'SF Pro Display', 'Helvetica Neue', Arial, sans-serif" font-size="12" fill="#475569" text-anchor="middle" font-weight="600">Python</text>
+
+  <rect x="330" y="548" width="54" height="28" rx="14" fill="#ede9fe" stroke="#ddd6fe" stroke-width="1"/>
+  <text x="357" y="567" font-family="'SF Pro Display', 'Helvetica Neue', Arial, sans-serif" font-size="12" fill="#6d28d9" text-anchor="middle" font-weight="600">MIT</text>
+
+  <!-- Built on karpathy note -->
+  <text x="68" y="608" font-family="'SF Pro Display', 'Helvetica Neue', Arial, sans-serif" font-size="12" fill="#94a3b8">Fork of karpathy/autoresearch · github.com/soveshmohapatra/autoresearch-2.0</text>
+
+  <!-- ── VERTICAL DIVIDER ── -->
+  <line x1="590" y1="40" x2="590" y2="587" stroke="#e2e8f0" stroke-width="1" stroke-dasharray="6,4"/>
+
+  <!-- ── RIGHT PANEL — Terminal ── -->
+
+  <!-- Terminal window -->
+  <rect x="620" y="52" width="548" height="523" rx="16" fill="url(#termGrad)" filter="url(#shadow)"/>
+
+  <!-- Terminal title bar -->
+  <rect x="620" y="52" width="548" height="44" rx="16" fill="#262840"/>
+  <rect x="620" y="68" width="548" height="28" fill="#262840"/>
+
+  <!-- Traffic lights -->
+  <circle cx="652" cy="74" r="7" fill="#ff5f57"/>
+  <circle cx="676" cy="74" r="7" fill="#ffbd2e"/>
+  <circle cx="700" cy="74" r="7" fill="#28ca42"/>
+
+  <!-- Terminal title -->
+  <text x="894" y="80" font-family="'SF Mono', 'Fira Code', monospace" font-size="13" fill="#6b7280" text-anchor="middle">autoresearch 2.0 — zsh</text>
+
+  <!-- Terminal content -->
+  <text x="645" y="126" font-family="'SF Mono', 'Fira Code', monospace" font-size="13" fill="#4ade80">┌─────────────────────────────────────────────┐</text>
+  <text x="645" y="146" font-family="'SF Mono', 'Fira Code', monospace" font-size="13" fill="#4ade80">│</text>
+  <text x="659" y="146" font-family="'SF Mono', 'Fira Code', monospace" font-size="13" fill="#f8fafc" font-weight="bold">  Autoresearch 2.0</text>
+  <text x="800" y="146" font-family="'SF Mono', 'Fira Code', monospace" font-size="13" fill="#6b7280">  ·  Apple Silicon  ·  MPS </text>
+  <text x="1142" y="146" font-family="'SF Mono', 'Fira Code', monospace" font-size="13" fill="#4ade80">│</text>
+  <text x="645" y="166" font-family="'SF Mono', 'Fira Code', monospace" font-size="13" fill="#4ade80">├─────────────────────────────────────────────┤</text>
+
+  <text x="645" y="186" font-family="'SF Mono', 'Fira Code', monospace" font-size="13" fill="#4ade80">│</text>
+  <text x="665" y="186" font-family="'SF Mono', 'Fira Code', monospace" font-size="13" fill="#94a3b8">  Experiment </text>
+  <text x="780" y="186" font-family="'SF Mono', 'Fira Code', monospace" font-size="13" fill="#f8fafc">exp_0311_1423_3             </text>
+  <text x="1142" y="186" font-family="'SF Mono', 'Fira Code', monospace" font-size="13" fill="#4ade80">│</text>
+
+  <text x="645" y="206" font-family="'SF Mono', 'Fira Code', monospace" font-size="13" fill="#4ade80">│</text>
+  <text x="665" y="206" font-family="'SF Mono', 'Fira Code', monospace" font-size="13" fill="#94a3b8">  Model      </text>
+  <text x="780" y="206" font-family="'SF Mono', 'Fira Code', monospace" font-size="13" fill="#f8fafc">Small-2.5M                  </text>
+  <text x="1142" y="206" font-family="'SF Mono', 'Fira Code', monospace" font-size="13" fill="#4ade80">│</text>
+
+  <text x="645" y="226" font-family="'SF Mono', 'Fira Code', monospace" font-size="13" fill="#4ade80">│</text>
+  <text x="665" y="226" font-family="'SF Mono', 'Fira Code', monospace" font-size="13" fill="#94a3b8">  Status     </text>
+  <text x="780" y="226" font-family="'SF Mono', 'Fira Code', monospace" font-size="13" fill="#4ade80" font-weight="bold">RUNNING                     </text>
+  <text x="1142" y="226" font-family="'SF Mono', 'Fira Code', monospace" font-size="13" fill="#4ade80">│</text>
+
+  <text x="645" y="246" font-family="'SF Mono', 'Fira Code', monospace" font-size="13" fill="#4ade80">│</text>
+  <text x="665" y="246" font-family="'SF Mono', 'Fira Code', monospace" font-size="13" fill="#94a3b8">  Elapsed    </text>
+  <text x="780" y="246" font-family="'SF Mono', 'Fira Code', monospace" font-size="13" fill="#f8fafc">04:32                       </text>
+  <text x="1142" y="246" font-family="'SF Mono', 'Fira Code', monospace" font-size="13" fill="#4ade80">│</text>
+
+  <text x="645" y="266" font-family="'SF Mono', 'Fira Code', monospace" font-size="13" fill="#4ade80">│</text>
+  <text x="665" y="266" font-family="'SF Mono', 'Fira Code', monospace" font-size="13" fill="#94a3b8">  Progress   </text>
+  <text x="780" y="266" font-family="'SF Mono', 'Fira Code', monospace" font-size="13" fill="#a78bfa">████████████</text>
+  <text x="936" y="266" font-family="'SF Mono', 'Fira Code', monospace" font-size="13" fill="#374151">░░░░░</text>
+  <text x="1000" y="266" font-family="'SF Mono', 'Fira Code', monospace" font-size="13" fill="#f8fafc">  63.4%</text>
+  <text x="1142" y="266" font-family="'SF Mono', 'Fira Code', monospace" font-size="13" fill="#4ade80">│</text>
+
+  <text x="645" y="286" font-family="'SF Mono', 'Fira Code', monospace" font-size="13" fill="#4ade80">│</text>
+  <text x="665" y="286" font-family="'SF Mono', 'Fira Code', monospace" font-size="13" fill="#94a3b8">  Train Loss </text>
+  <text x="780" y="286" font-family="'SF Mono', 'Fira Code', monospace" font-size="13" fill="#fbbf24">2.847291                    </text>
+  <text x="1142" y="286" font-family="'SF Mono', 'Fira Code', monospace" font-size="13" fill="#4ade80">│</text>
+
+  <text x="645" y="306" font-family="'SF Mono', 'Fira Code', monospace" font-size="13" fill="#4ade80">│</text>
+  <text x="665" y="306" font-family="'SF Mono', 'Fira Code', monospace" font-size="13" fill="#94a3b8">  Val BPB    </text>
+  <text x="780" y="306" font-family="'SF Mono', 'Fira Code', monospace" font-size="13" fill="#34d399">1.923847                    </text>
+  <text x="1142" y="306" font-family="'SF Mono', 'Fira Code', monospace" font-size="13" fill="#4ade80">│</text>
+
+  <text x="645" y="326" font-family="'SF Mono', 'Fira Code', monospace" font-size="13" fill="#4ade80">├─────────────────────────────────────────────┤</text>
+
+  <text x="645" y="346" font-family="'SF Mono', 'Fira Code', monospace" font-size="13" fill="#4ade80">│</text>
+  <text x="665" y="346" font-family="'SF Mono', 'Fira Code', monospace" font-size="13" fill="#94a3b8">  Loss Curve                                 </text>
+  <text x="1142" y="346" font-family="'SF Mono', 'Fira Code', monospace" font-size="13" fill="#4ade80">│</text>
+
+  <text x="645" y="366" font-family="'SF Mono', 'Fira Code', monospace" font-size="13" fill="#4ade80">│</text>
+  <text x="665" y="366" font-family="'SF Mono', 'Fira Code', monospace" font-size="13" fill="#6366f1">  █</text>
+  <text x="690" y="366" font-family="'SF Mono', 'Fira Code', monospace" font-size="13" fill="#7c7cf8">▇</text>
+  <text x="700" y="366" font-family="'SF Mono', 'Fira Code', monospace" font-size="13" fill="#8b8bf9">▆</text>
+  <text x="710" y="366" font-family="'SF Mono', 'Fira Code', monospace" font-size="13" fill="#9a9afa">▅</text>
+  <text x="720" y="366" font-family="'SF Mono', 'Fira Code', monospace" font-size="13" fill="#a78bfa">▄</text>
+  <text x="730" y="366" font-family="'SF Mono', 'Fira Code', monospace" font-size="13" fill="#a78bfa">▄</text>
+  <text x="740" y="366" font-family="'SF Mono', 'Fira Code', monospace" font-size="13" fill="#b39cfb">▃</text>
+  <text x="750" y="366" font-family="'SF Mono', 'Fira Code', monospace" font-size="13" fill="#b39cfb">▃</text>
+  <text x="760" y="366" font-family="'SF Mono', 'Fira Code', monospace" font-size="13" fill="#c4b5fd">▃</text>
+  <text x="770" y="366" font-family="'SF Mono', 'Fira Code', monospace" font-size="13" fill="#c4b5fd">▂</text>
+  <text x="780" y="366" font-family="'SF Mono', 'Fira Code', monospace" font-size="13" fill="#34d399">▂</text>
+  <text x="790" y="366" font-family="'SF Mono', 'Fira Code', monospace" font-size="13" fill="#34d399">▂</text>
+  <text x="800" y="366" font-family="'SF Mono', 'Fira Code', monospace" font-size="13" fill="#34d399">▂</text>
+  <text x="810" y="366" font-family="'SF Mono', 'Fira Code', monospace" font-size="13" fill="#34d399">▂</text>
+  <text x="820" y="366" font-family="'SF Mono', 'Fira Code', monospace" font-size="13" fill="#4ade80">▁</text>
+  <text x="830" y="366" font-family="'SF Mono', 'Fira Code', monospace" font-size="13" fill="#4ade80">▁</text>
+  <text x="840" y="366" font-family="'SF Mono', 'Fira Code', monospace" font-size="13" fill="#4ade80">▁</text>
+  <text x="850" y="366" font-family="'SF Mono', 'Fira Code', monospace" font-size="13" fill="#4ade80">▁</text>
+  <text x="860" y="366" font-family="'SF Mono', 'Fira Code', monospace" font-size="13" fill="#4ade80">▁</text>
+  <text x="870" y="366" font-family="'SF Mono', 'Fira Code', monospace" font-size="13" fill="#4ade80">▁</text>
+  <text x="1142" y="366" font-family="'SF Mono', 'Fira Code', monospace" font-size="13" fill="#4ade80">│</text>
+
+  <text x="645" y="386" font-family="'SF Mono', 'Fira Code', monospace" font-size="13" fill="#4ade80">│</text>
+  <text x="665" y="386" font-family="'SF Mono', 'Fira Code', monospace" font-size="13" fill="#94a3b8">  Start: </text>
+  <text x="728" y="386" font-family="'SF Mono', 'Fira Code', monospace" font-size="13" fill="#f87171">9.2341</text>
+  <text x="790" y="386" font-family="'SF Mono', 'Fira Code', monospace" font-size="13" fill="#94a3b8"> → Now: </text>
+  <text x="850" y="386" font-family="'SF Mono', 'Fira Code', monospace" font-size="13" fill="#4ade80">2.8472</text>
+  <text x="910" y="386" font-family="'SF Mono', 'Fira Code', monospace" font-size="13" fill="#34d399">  ▼6.3869</text>
+  <text x="1142" y="386" font-family="'SF Mono', 'Fira Code', monospace" font-size="13" fill="#4ade80">│</text>
+
+  <text x="645" y="406" font-family="'SF Mono', 'Fira Code', monospace" font-size="13" fill="#4ade80">└─────────────────────────────────────────────┘</text>
+
+  <!-- Agent output section -->
+  <text x="645" y="440" font-family="'SF Mono', 'Fira Code', monospace" font-size="12" fill="#6b7280">$</text>
+  <text x="660" y="440" font-family="'SF Mono', 'Fira Code', monospace" font-size="12" fill="#94a3b8"> uv run python agent.py</text>
+
+  <text x="645" y="460" font-family="'SF Mono', 'Fira Code', monospace" font-size="12" fill="#6366f1">→</text>
+  <text x="663" y="460" font-family="'SF Mono', 'Fira Code', monospace" font-size="12" fill="#94a3b8"> Agent: reading 42 past experiments...</text>
+
+  <text x="645" y="480" font-family="'SF Mono', 'Fira Code', monospace" font-size="12" fill="#6366f1">→</text>
+  <text x="663" y="480" font-family="'SF Mono', 'Fira Code', monospace" font-size="12" fill="#94a3b8"> Proposal: try USE_SWIGLU=True, DEPTH=6</text>
+
+  <text x="645" y="500" font-family="'SF Mono', 'Fira Code', monospace" font-size="12" fill="#4ade80">✓</text>
+  <text x="663" y="500" font-family="'SF Mono', 'Fira Code', monospace" font-size="12" fill="#4ade80"> val_bpb improved: 1.923 → 1.891  KEPT</text>
+
+  <text x="645" y="520" font-family="'SF Mono', 'Fira Code', monospace" font-size="12" fill="#6366f1">→</text>
+  <text x="663" y="520" font-family="'SF Mono', 'Fira Code', monospace" font-size="12" fill="#94a3b8"> Starting experiment #44...</text>
+
+  <!-- Blinking cursor -->
+  <rect x="645" y="540" width="8" height="14" rx="1" fill="#6366f1" opacity="0.9"/>
+
+  <!-- Bottom GitHub label -->
+  <text x="894" y="576" font-family="'SF Mono', 'Fira Code', monospace" font-size="11" fill="#374151" text-anchor="middle">github.com/soveshmohapatra/autoresearch-2.0</text>
+</svg>

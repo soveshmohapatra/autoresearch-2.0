@@ -1,5 +1,7 @@
 # Autoresearch 2.0
 
+![Autoresearch 2.0](linkedin_post_image.svg)
+
 > *One day, frontier AI research used to be done by meat computers in between eating, sleeping, having other fun, and synchronizing once in a while using sound wave interconnect in the ritual of "group meeting". That era is long gone.*
 > **— @karpathy, March 2026**
 
