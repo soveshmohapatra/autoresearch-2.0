@@ -639,10 +639,9 @@ class Dashboard:
         while True:
             console.print("\n[bold]What would you like to do?[/bold]")
             console.print("  [cyan]1[/cyan]. View model catalog")
-            console.print("  [cyan]2[/cyan]. Run an experiment")
-            console.print("  [cyan]3[/cyan]. Run agent + Optuna together")
-            console.print("  [cyan]4[/cyan]. View experiment history")
-            console.print("  [cyan]5[/cyan]. Detect hardware")
+            console.print("  [cyan]2[/cyan]. Run agent + Optuna together")
+            console.print("  [cyan]3[/cyan]. View experiment history")
+            console.print("  [cyan]4[/cyan]. Detect hardware")
             console.print("  [cyan]q[/cyan]. Quit")
 
             choice = Prompt.ask("\nChoice", default="2")
@@ -650,12 +649,10 @@ class Dashboard:
             if choice == "1":
                 self.show_models()
             elif choice == "2":
-                self.run_experiment()
-            elif choice == "3":
                 self.run_all()
-            elif choice == "4":
+            elif choice == "3":
                 self.show_history()
-            elif choice == "5":
+            elif choice == "4":
                 print_hardware_report(self.hardware)
             elif choice.lower() in ("q", "quit", "exit"):
                 console.print("[dim]Bye.[/dim]")
