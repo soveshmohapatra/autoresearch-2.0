@@ -169,5 +169,39 @@ def main():
     print(f"Results log: {TRIALS_LOG}  |  DB: {STORAGE}")
 
 
+# ---------------------------------------------------------------------------
+# Agent integration helpers
+# ---------------------------------------------------------------------------
+
+def create_or_load_study(study_name: str = "autoresearch_hpo") -> "optuna.Study":
+    """Create or load an Optuna study for use inside the agent loop."""
+    sampler = TPESampler(seed=42, n_startup_trials=5)
+    pruner  = MedianPruner(n_startup_trials=5)
+    return optuna.create_study(
+        study_name=study_name,
+        storage=STORAGE,
+        direction="minimize",
+        sampler=sampler,
+        pruner=pruner,
+        load_if_exists=True,
+    )
+
+
+def ask_trial(study: "optuna.Study") -> tuple:
+    """Ask the study for a new trial and return (trial, params_dict)."""
+    trial  = study.ask()
+    params = suggest(trial)
+    return trial, params
+
+
+def tell_trial(study: "optuna.Study", trial, val_bpb: float | None) -> None:
+    """Report the training result back to the study."""
+    import optuna as _opt
+    if val_bpb is not None:
+        study.tell(trial, val_bpb)
+    else:
+        study.tell(trial, state=_opt.trial.TrialState.FAIL)
+
+
 if __name__ == "__main__":
     main()

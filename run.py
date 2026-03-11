@@ -12,13 +12,12 @@ Usage:
   uv run python run.py optuna --trials 50 --time-budget 120 --language hi
   uv run python run.py optuna --best                      # print best params found so far
 
-  uv run python run.py all                                # agent + optuna in parallel
-  uv run python run.py all --agent-runs 20 --optuna-trials 30 --language hi
+  uv run python run.py all                                # agent + optuna as built-in helper
+  uv run python run.py all --agent-runs 20 --language hi
 """
 
 from __future__ import annotations
 import sys
-import signal
 import subprocess
 import argparse
 from pathlib import Path
@@ -29,13 +28,6 @@ HERE = Path(__file__).parent
 def _run(cmd: list[str]) -> int:
     """Run a command in the same directory, inheriting stdio."""
     return subprocess.run(cmd, cwd=HERE).returncode
-
-
-def _popen(cmd: list[str], log_path: Path) -> subprocess.Popen:
-    """Start a background process, writing stdout+stderr to log_path."""
-    log_path.parent.mkdir(parents=True, exist_ok=True)
-    f = open(log_path, "w")
-    return subprocess.Popen(cmd, cwd=HERE, stdout=f, stderr=subprocess.STDOUT)
 
 
 def main() -> None:
@@ -83,19 +75,14 @@ def main() -> None:
     # ── all ──────────────────────────────────────────────────────────────────
     p_all = sub.add_parser(
         "all",
-        help="Run agent + optuna in parallel (both call train internally)",
+        help="Run agent with Optuna as a built-in helper (single process)",
     )
     p_all.add_argument("--language", default="en")
     p_all.add_argument("--agent-runs", type=int, default=0,
                        help="Max agent experiments (0 = infinite)")
     p_all.add_argument("--agent-tag", default=None,
                        help="Git branch tag for agent experiments")
-    p_all.add_argument("--optuna-trials", type=int, default=20)
-    p_all.add_argument("--time-budget", type=int, default=300,
-                       help="Seconds per training run (used by both agent and optuna)")
     p_all.add_argument("--study-name", default="autoresearch_hpo")
-    p_all.add_argument("--logs-dir", default="logs",
-                       help="Directory for background process logs (default: logs/)")
 
     args = parser.parse_args()
 
@@ -135,54 +122,11 @@ def main() -> None:
         sys.exit(_run(cmd))
 
     elif args.mode == "all":
-        logs = HERE / args.logs_dir
-
-        agent_cmd = [sys.executable, "agent.py"]
+        agent_cmd = [sys.executable, "agent.py", "--use-optuna",
+                     "--study-name", args.study_name]
         if args.agent_runs: agent_cmd += ["--max-runs", str(args.agent_runs)]
         if args.agent_tag:  agent_cmd += ["--tag", args.agent_tag]
-
-        optuna_cmd = [sys.executable, "optuna_search.py",
-                      "--trials", str(args.optuna_trials),
-                      "--time-budget", str(args.time_budget),
-                      "--language", args.language,
-                      "--study-name", args.study_name]
-
-        agent_log  = logs / "agent.log"
-        optuna_log = logs / "optuna.log"
-
-        print(f"Starting agent  → log: {agent_log}")
-        print(f"Starting optuna → log: {optuna_log}")
-        print("Press Ctrl+C to stop both.\n")
-
-        agent_proc  = _popen(agent_cmd,  agent_log)
-        optuna_proc = _popen(optuna_cmd, optuna_log)
-        procs = [agent_proc, optuna_proc]
-
-        def _stop(*_):
-            print("\nStopping all processes...")
-            for p in procs:
-                try:
-                    p.terminate()
-                except Exception:
-                    pass
-
-        signal.signal(signal.SIGINT,  _stop)
-        signal.signal(signal.SIGTERM, _stop)
-
-        # Stream both logs to the terminal in real time
-        tail_proc = subprocess.Popen(
-            ["tail", "-f", str(agent_log), str(optuna_log)],
-            cwd=HERE,
-        )
-
-        # Wait until both finish (or Ctrl+C)
-        for p in procs:
-            p.wait()
-        tail_proc.terminate()
-
-        codes = [p.returncode for p in procs]
-        print(f"\nDone. agent={codes[0]}  optuna={codes[1]}")
-        sys.exit(max(c or 0 for c in codes))
+        sys.exit(_run(agent_cmd))
 
 
 if __name__ == "__main__":

@@ -32,6 +32,12 @@ try:
 except ImportError:
     _anthropic_mod = None
 
+try:
+    from optuna_search import create_or_load_study, ask_trial, tell_trial
+    _optuna_available = True
+except ImportError:
+    _optuna_available = False
+
 # ---------------------------------------------------------------------------
 # Config
 # ---------------------------------------------------------------------------
@@ -110,6 +116,20 @@ def get_results_history() -> str:
     header = lines[0] if lines else ""
     rows = lines[1:][-20:]
     return "\n".join([header] + rows) if rows else "(no experiments yet)"
+
+
+def get_last_val_bpb() -> float | None:
+    """Read val_bpb from the most recent run.log."""
+    log_path = Path("run.log")
+    if not log_path.exists():
+        return None
+    try:
+        for line in reversed(log_path.read_text().splitlines()):
+            if line.startswith("val_bpb:"):
+                return float(line.split(":")[1].strip())
+    except Exception:
+        pass
+    return None
 
 
 def get_current_branch() -> str:
@@ -194,7 +214,19 @@ Rules:
 - Respond with ONLY the two sections above. No extra explanation."""
 
 
-def build_user_prompt(edit_zone: str, results: str, device: str) -> str:
+def build_user_prompt(edit_zone: str, results: str, device: str, optuna_hint: dict | None = None) -> str:
+    optuna_section = ""
+    if optuna_hint:
+        hint_lines = "\n".join(f"  {k}: {v}" for k, v in optuna_hint.items())
+        optuna_section = f"""
+## Optuna suggestion (TPE sampler, learned from past trials)
+
+{hint_lines}
+
+These are values Optuna's Bayesian optimizer suggests based on experiment history.
+Consider using them when choosing hyperparameter values.
+
+"""
     return f"""## Current AGENT EDIT ZONE (train.py)
 
 ```python
@@ -210,7 +242,7 @@ def build_user_prompt(edit_zone: str, results: str, device: str) -> str:
 ## Hardware
 
 Device: {device}
-
+{optuna_section}
 ## Task
 
 Propose the single most promising change to minimize val_bpb.
@@ -305,6 +337,8 @@ def main():
     parser.add_argument("--max-runs", type=int, default=0, help="Max experiments (0 = infinite)")
     parser.add_argument("--dry-run", action="store_true", help="Propose edits but don't train")
     parser.add_argument("--tag", type=str, default=None, help="Branch tag (e.g. mar10)")
+    parser.add_argument("--use-optuna", action="store_true", help="Use Optuna TPE for hyperparameter hints")
+    parser.add_argument("--study-name", default="autoresearch_hpo", help="Optuna study name")
     args = parser.parse_args()
 
     api_key = os.environ.get("ANTHROPIC_API_KEY")
@@ -337,6 +371,15 @@ def main():
     device = detect_device()
     print(f"Device: {device}")
 
+    study = None
+    if args.use_optuna:
+        if _optuna_available:
+            study = create_or_load_study(args.study_name)
+            completed = len([t for t in study.trials if t.state.name == "COMPLETE"])
+            print(f"Optuna: study '{args.study_name}' ({completed} completed trials)")
+        else:
+            print("Warning: optuna not available, --use-optuna ignored")
+
     system_prompt = build_system_prompt()
     run_count = 0
 
@@ -359,8 +402,16 @@ def main():
 
         print("Asking Claude for next experiment...")
 
+        optuna_trial = None
+        optuna_hint = None
+        if study is not None:
+            try:
+                optuna_trial, optuna_hint = ask_trial(study)
+            except Exception as e:
+                print(f"  Optuna suggest error: {e}")
+
         try:
-            user_prompt = build_user_prompt(edit_zone, results, device)
+            user_prompt = build_user_prompt(edit_zone, results, device, optuna_hint)
             if use_cli:
                 response = _call_via_cli(system_prompt, user_prompt)
             else:
@@ -393,6 +444,11 @@ def main():
         try:
             kept = run_experiment(description, dry_run=args.dry_run)
             print(f"  Result: {'kept' if kept else 'discarded/crashed'}")
+            if study is not None and optuna_trial is not None:
+                val_bpb = get_last_val_bpb()
+                tell_trial(study, optuna_trial, val_bpb)
+                if val_bpb:
+                    print(f"  Optuna recorded: val_bpb={val_bpb:.6f}")
         except Exception as e:
             print(f"  Experiment failed: {e}")
             try:

@@ -21,7 +21,6 @@ from rich.panel import Panel
 from rich.live import Live
 from rich.text import Text
 from rich.prompt import Prompt
-from rich.columns import Columns
 from rich import box
 
 from hardware import detect_hardware, print_hardware_report
@@ -558,50 +557,35 @@ class Dashboard:
         ))
 
     def run_all(self):
-        """Run agent + Optuna together with a live split-panel log display."""
+        """Run agent with Optuna as a built-in helper."""
         language = self.pick_language()
         lang_name = LANGUAGE_OPTIONS.get(language, language)
 
-        agent_runs_str  = Prompt.ask("Max agent experiments (0 = infinite)", default="0")
-        optuna_trials_str = Prompt.ask("Optuna trials", default="20")
-        time_budget_str = Prompt.ask("Time budget per training run (seconds)", default="300")
+        agent_runs_str = Prompt.ask("Max agent experiments (0 = infinite)", default="0")
+        study_name     = Prompt.ask("Optuna study name", default="autoresearch_hpo")
         try:
-            agent_runs    = int(agent_runs_str)
-            optuna_trials = int(optuna_trials_str)
-            time_budget   = max(30, int(time_budget_str))
+            agent_runs = int(agent_runs_str)
         except ValueError:
-            agent_runs, optuna_trials, time_budget = 0, 20, 300
+            agent_runs = 0
 
-        logs_dir = Path("logs")
-        logs_dir.mkdir(exist_ok=True)
-        agent_log  = logs_dir / "agent.log"
-        optuna_log = logs_dir / "optuna.log"
+        Path("logs").mkdir(exist_ok=True)
+        agent_log = Path("logs/agent.log")
 
-        agent_cmd = [sys.executable, "agent.py"]
+        agent_cmd = [sys.executable, "agent.py", "--use-optuna", "--study-name", study_name]
         if agent_runs:
             agent_cmd += ["--max-runs", str(agent_runs)]
 
-        optuna_cmd = [
-            sys.executable, "optuna_search.py",
-            "--trials", str(optuna_trials),
-            "--time-budget", str(time_budget),
-            "--language", language,
-        ]
-
-        agent_f  = open(agent_log,  "w")
-        optuna_f = open(optuna_log, "w")
-        agent_proc  = subprocess.Popen(agent_cmd,  stdout=agent_f,  stderr=subprocess.STDOUT)
-        optuna_proc = subprocess.Popen(optuna_cmd, stdout=optuna_f, stderr=subprocess.STDOUT)
+        agent_f    = open(agent_log, "w")
+        agent_proc = subprocess.Popen(agent_cmd, stdout=agent_f, stderr=subprocess.STDOUT)
 
         console.print(
-            f"\n[green]Started[/green] agent (PID {agent_proc.pid}) + "
-            f"optuna (PID {optuna_proc.pid}) · [magenta]{lang_name}[/magenta]"
+            f"\n[green]Started[/green] agent + Optuna (PID {agent_proc.pid}) · "
+            f"[magenta]{lang_name}[/magenta]"
         )
-        console.print(f"[dim]Logs → {agent_log}  |  {optuna_log}[/dim]")
-        console.print("[dim]Press Ctrl+C to stop both.[/dim]\n")
+        console.print(f"[dim]Log → {agent_log}[/dim]")
+        console.print("[dim]Press Ctrl+C to stop.[/dim]\n")
 
-        agent_lines: list[str]  = []
-        optuna_lines: list[str] = []
+        agent_lines: list[str] = []
 
         def _tail(path: Path, buf: list[str]) -> None:
             try:
@@ -610,48 +594,42 @@ class Dashboard:
                         line = fh.readline()
                         if line:
                             buf.append(line.rstrip())
-                            if len(buf) > 60:
+                            if len(buf) > 80:
                                 buf.pop(0)
                         else:
                             time.sleep(0.1)
             except Exception:
                 pass
 
-        time.sleep(0.5)  # let log files be created
-        threading.Thread(target=_tail, args=(agent_log,  agent_lines),  daemon=True).start()
-        threading.Thread(target=_tail, args=(optuna_log, optuna_lines), daemon=True).start()
+        time.sleep(0.5)
+        threading.Thread(target=_tail, args=(agent_log, agent_lines), daemon=True).start()
 
         def _make_display():
-            a_status = "RUNNING" if agent_proc.poll()  is None else f"DONE({agent_proc.returncode})"
-            o_status = "RUNNING" if optuna_proc.poll() is None else f"DONE({optuna_proc.returncode})"
-            a_color  = "green"  if agent_proc.poll()  is None else "dim"
-            o_color  = "green"  if optuna_proc.poll() is None else "dim"
-            a_text = "\n".join(agent_lines[-14:])  or "[dim]waiting for output...[/dim]"
-            o_text = "\n".join(optuna_lines[-14:]) or "[dim]waiting for output...[/dim]"
-            return Columns([
-                Panel(Text(a_text), title=f"[bold]Agent[/bold]  [{a_color}]{a_status}[/{a_color}]",  border_style="cyan",    width=console.width // 2 - 2),
-                Panel(Text(o_text), title=f"[bold]Optuna[/bold] [{o_color}]{o_status}[/{o_color}]", border_style="magenta", width=console.width // 2 - 2),
-            ])
+            status  = "RUNNING" if agent_proc.poll() is None else f"DONE({agent_proc.returncode})"
+            color   = "green"   if agent_proc.poll() is None else "dim"
+            content = "\n".join(agent_lines[-20:]) or "[dim]waiting for output...[/dim]"
+            return Panel(
+                Text(content),
+                title=f"[bold]Agent + Optuna[/bold]  [{color}]{status}[/{color}]",
+                border_style="cyan",
+            )
 
         try:
             with Live(console=console, refresh_per_second=2, screen=True) as live:
-                while agent_proc.poll() is None or optuna_proc.poll() is None:
+                while agent_proc.poll() is None:
                     live.update(_make_display())
                     time.sleep(0.5)
                 live.update(_make_display())
         except KeyboardInterrupt:
-            console.print("\n[yellow]Stopping both processes...[/yellow]")
-            for p in (agent_proc, optuna_proc):
-                try:
-                    p.terminate()
-                except Exception:
-                    pass
+            console.print("\n[yellow]Stopping agent...[/yellow]")
+            try:
+                agent_proc.terminate()
+            except Exception:
+                pass
         finally:
             agent_f.close()
-            optuna_f.close()
 
-        codes = [agent_proc.returncode or 0, optuna_proc.returncode or 0]
-        console.print(f"\n[dim]Done. agent={codes[0]}  optuna={codes[1]}[/dim]")
+        console.print(f"\n[dim]Done. exit={agent_proc.returncode or 0}[/dim]")
 
     def run_menu(self):
         """Main interactive menu loop."""
