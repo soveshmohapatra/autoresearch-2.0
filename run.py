@@ -123,7 +123,8 @@ def main() -> None:
 
     elif args.mode == "all":
         agent_cmd = [sys.executable, "agent.py", "--use-optuna",
-                     "--study-name", args.study_name]
+                     "--study-name", args.study_name,
+                     "--language", args.language]
         if args.agent_runs: agent_cmd += ["--max-runs", str(args.agent_runs)]
         if args.agent_tag:  agent_cmd += ["--tag", args.agent_tag]
         sys.exit(_run(agent_cmd))

@@ -294,6 +294,16 @@ def parse_claude_response(response: str) -> tuple[str, str]:
 # Main agent loop
 # ---------------------------------------------------------------------------
 
+def _detect_language() -> str:
+    """Return the first language that has a prepared tokenizer in the cache."""
+    cache_root = Path.home() / ".cache" / "autoresearch"
+    if cache_root.exists():
+        for lang_dir in sorted(cache_root.iterdir()):
+            if (lang_dir / "tokenizer" / "tokenizer.pkl").exists():
+                return lang_dir.name
+    return "en"  # fallback
+
+
 def detect_device() -> str:
     """Detect the hardware device string."""
     try:
@@ -310,7 +320,7 @@ def detect_device() -> str:
     return "unknown"
 
 
-def run_experiment(description: str, dry_run: bool = False) -> bool:
+def run_experiment(description: str, dry_run: bool = False, language: str | None = None) -> bool:
     """
     Commit current train.py and run the experiment via run_loop.py --auto.
     Returns True if the experiment was kept.
@@ -325,10 +335,10 @@ def run_experiment(description: str, dry_run: bool = False) -> bool:
         return False
 
     print(f"  Running experiment: {description}")
-    result = subprocess.run(
-        [sys.executable, "run_loop.py", "--auto", "--desc", description, "--no-memory"],
-        capture_output=False,
-    )
+    cmd = [sys.executable, "run_loop.py", "--auto", "--desc", description, "--no-memory"]
+    if language:
+        cmd += ["--language", language]
+    result = subprocess.run(cmd, capture_output=False)
     return result.returncode == 0
 
 
@@ -339,6 +349,7 @@ def main():
     parser.add_argument("--tag", type=str, default=None, help="Branch tag (e.g. mar10)")
     parser.add_argument("--use-optuna", action="store_true", help="Use Optuna TPE for hyperparameter hints")
     parser.add_argument("--study-name", default="autoresearch_hpo", help="Optuna study name")
+    parser.add_argument("--language", type=str, default=None, help="Language code (en, hi, fr, etc.)")
     args = parser.parse_args()
 
     api_key = os.environ.get("ANTHROPIC_API_KEY")
@@ -370,6 +381,9 @@ def main():
 
     device = detect_device()
     print(f"Device: {device}")
+
+    language = args.language or _detect_language()
+    print(f"Language: {language}")
 
     study = None
     if args.use_optuna:
@@ -442,7 +456,7 @@ def main():
             continue
 
         try:
-            kept = run_experiment(description, dry_run=args.dry_run)
+            kept = run_experiment(description, dry_run=args.dry_run, language=language)
             print(f"  Result: {'kept' if kept else 'discarded/crashed'}")
             if study is not None and optuna_trial is not None:
                 val_bpb = get_last_val_bpb()

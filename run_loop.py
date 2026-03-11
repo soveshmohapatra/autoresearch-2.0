@@ -219,6 +219,7 @@ def main():
     parser.add_argument("--detect", action="store_true", help="Detect hardware and exit")
     parser.add_argument("--no-memory", action="store_true", help="Skip memory context display")
     parser.add_argument("--time-budget", type=int, default=None, help="Override TIME_BUDGET for this run (seconds)")
+    parser.add_argument("--language", type=str, default=None, help="Language code (en, hi, fr, etc.)")
     args = parser.parse_args()
 
     # Hardware detect only
@@ -247,6 +248,8 @@ def main():
     train_cmd = [sys.executable, "train.py"]
     if args.time_budget is not None:
         train_cmd += ["--time-budget", str(args.time_budget)]
+    if args.language is not None:
+        train_cmd += ["--language", args.language]
     print(f"\nRunning: {' '.join(train_cmd)}  (output → {log_path})")
     print("Press Ctrl+C to abort.\n")
 
@@ -306,7 +309,7 @@ def main():
             print("[auto] Recording as crash, reverting.")
             record_experiment(commit, 0.0, 0.0, "crash", description, metrics)
             subprocess.run(["git", "reset", "--hard", "HEAD~1"])
-        return
+        sys.exit(1)
 
     # Print summary
     print(f"\n{'─'*50}")

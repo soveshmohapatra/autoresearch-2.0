@@ -571,7 +571,8 @@ class Dashboard:
         Path("logs").mkdir(exist_ok=True)
         agent_log = Path("logs/agent.log")
 
-        agent_cmd = [sys.executable, "agent.py", "--use-optuna", "--study-name", study_name]
+        agent_cmd = [sys.executable, "agent.py", "--use-optuna", "--study-name", study_name,
+                     "--language", language]
         if agent_runs:
             agent_cmd += ["--max-runs", str(agent_runs)]
 
