@@ -813,7 +813,7 @@ class Adafactor(torch.optim.Optimizer):
 # --- Model architecture ---
 DEPTH         = 4           # number of transformer layers
 ASPECT_RATIO  = 32          # model_dim = depth * aspect_ratio (must give model_dim % head_dim == 0)
-HEAD_DIM      = 128         # attention head dimension (keep at 128)
+HEAD_DIM      = 64          # attention head dimension (reduced for 2 heads)
 WINDOW_PATTERN = "SSSL"     # attention pattern: L=full context, S=half context
 
 # --- Architecture variants (True/False to toggle) ---
